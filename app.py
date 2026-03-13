@@ -7,6 +7,7 @@ st.title("BRI Transaction Database Generator")
 
 uploaded_file = st.file_uploader("Upload File Excel", type=["xlsx"])
 
+
 def ambil_kode_unik(text):
 
     if pd.isna(text):
@@ -46,25 +47,73 @@ def ambil_kode_unik(text):
     return "N/A"
 
 
+def detect_header(file):
+
+    preview = pd.read_excel(file, header=None, nrows=20)
+
+    for i in range(20):
+        row = preview.iloc[i].astype(str).str.lower()
+
+        if any("uraian" in cell for cell in row):
+            return i
+
+    return 0
+
+
+def detect_columns(df):
+
+    df.columns = df.columns.str.strip()
+
+    uraian_col = None
+    id_col = None
+
+    for col in df.columns:
+
+        if "uraian" in col.lower():
+            uraian_col = col
+
+        if col.lower() == "id":
+            id_col = col
+
+    return id_col, uraian_col
+
+
 if uploaded_file:
 
-    df = pd.read_excel(uploaded_file, header=4)
+    header_row = detect_header(uploaded_file)
 
-    df["KODE_UNIK"] = df["Uraian Transaksi"].apply(ambil_kode_unik)
+    df = pd.read_excel(uploaded_file, header=header_row)
 
-    database = df[["ID", "KODE_UNIK", "Uraian Transaksi"]]
+    id_col, uraian_col = detect_columns(df)
 
-    database["ID"] = pd.to_numeric(database["ID"], errors="coerce")
+    if uraian_col is None:
+        st.error("Kolom Uraian Transaksi tidak ditemukan.")
+        st.write("Kolom yang tersedia:", df.columns)
+        st.stop()
+
+    if id_col is None:
+        st.error("Kolom ID tidak ditemukan.")
+        st.write("Kolom yang tersedia:", df.columns)
+        st.stop()
+
+    df["KODE_UNIK"] = df[uraian_col].apply(ambil_kode_unik)
+
+    database = df[[id_col, "KODE_UNIK", uraian_col]]
+
+    database[id_col] = pd.to_numeric(database[id_col], errors="coerce")
 
     valid = database[database["KODE_UNIK"] != "N/A"]
     anomali = database[database["KODE_UNIK"] == "N/A"]
 
-    valid = valid.drop_duplicates(subset=["ID","KODE_UNIK"])
-    valid = valid.sort_values("ID")
+    valid = valid.drop_duplicates(subset=[id_col, "KODE_UNIK"])
 
-    hasil = pd.concat([valid, anomali])
+    valid = valid.sort_values(id_col)
 
-    st.success("Database berhasil dibuat!")
+    hasil = pd.concat([valid, anomali]).reset_index(drop=True)
+
+    st.success("Database berhasil dibuat")
+
+    st.write("Jumlah transaksi N/A:", len(anomali))
 
     st.dataframe(hasil)
 
@@ -72,8 +121,7 @@ if uploaded_file:
     hasil.to_excel(output, index=False)
 
     st.download_button(
-        label="Download DATABASE_HASIL.xlsx",
-        data=output.getvalue(),
-        file_name="DATABASE_HASIL.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        "Download DATABASE_HASIL.xlsx",
+        output.getvalue(),
+        "DATABASE_HASIL.xlsx"
     )
