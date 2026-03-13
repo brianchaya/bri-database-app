@@ -1,52 +1,8 @@
-import streamlit as st
 import pandas as pd
 import re
-from io import BytesIO
-
-st.title("BRI Transaction Database Generator")
-
-uploaded_file = st.file_uploader("Upload File Excel", type=["xlsx"])
 
 
-def ambil_kode_unik(text):
-
-    if pd.isna(text):
-        return "N/A"
-
-    text = str(text)
-
-    m = re.search(r'BFVA11167000(\d{5})', text)
-    if m:
-        return m.group(1)
-
-    m = re.search(r'BRIVA11167000(\d{5})', text)
-    if m:
-        return m.group(1)
-
-    m = re.search(r'NBMB\s(.*?)\sTO', text)
-    if m:
-        return m.group(1).strip()
-
-    m = re.search(r'301([A-Z\s]+?):', text)
-    if m:
-        return m.group(1).strip()
-
-    for i in range(10):
-        m = re.search(fr'ATM{i} ATM{i} (.*?)  TO', text)
-        if m:
-            return m.group(1).strip()
-
-    m = re.search(r'FROM (.*?) LA', text)
-    if m:
-        return m.group(1).strip()
-
-    m = re.search(r'FROM (.*?) ATM', text)
-    if m:
-        return m.group(1).strip()
-
-    return "N/A"
-
-
+# ===== AUTO DETECT HEADER =====
 def detect_header(file):
 
     preview = pd.read_excel(file, header=None, nrows=20)
@@ -60,6 +16,7 @@ def detect_header(file):
     return 0
 
 
+# ===== AUTO DETECT COLUMN =====
 def detect_columns(df):
 
     df.columns = df.columns.str.strip()
@@ -78,50 +35,90 @@ def detect_columns(df):
     return id_col, uraian_col
 
 
-if uploaded_file:
+# ===== EXTRACT UNIQUE CODE =====
+def ambil_kode_unik(text):
 
-    header_row = detect_header(uploaded_file)
+    if pd.isna(text):
+        return "N/A"
 
-    df = pd.read_excel(uploaded_file, header=header_row)
+    text = str(text)
 
-    id_col, uraian_col = detect_columns(df)
+    # MODEL 1
+    m = re.search(r'BFVA11167000(\d{5})', text)
+    if m:
+        return m.group(1)
 
-    if uraian_col is None:
-        st.error("Kolom Uraian Transaksi tidak ditemukan.")
-        st.write("Kolom yang tersedia:", df.columns)
-        st.stop()
+    # MODEL 3
+    m = re.search(r'BRIVA11167000(\d{5})', text)
+    if m:
+        return m.group(1)
 
-    if id_col is None:
-        st.error("Kolom ID tidak ditemukan.")
-        st.write("Kolom yang tersedia:", df.columns)
-        st.stop()
+    # MODEL 2
+    m = re.search(r'NBMB\s(.*?)\sTO', text)
+    if m:
+        return m.group(1).strip()
 
-    df["KODE_UNIK"] = df[uraian_col].apply(ambil_kode_unik)
+    # MODEL 4
+    m = re.search(r'301([A-Z\s]+?):', text)
+    if m:
+        return m.group(1).strip()
 
-    database = df[[id_col, "KODE_UNIK", uraian_col]]
+    # MODEL 5 ATM0-ATM9
+    for i in range(10):
+        m = re.search(fr'ATM{i} ATM{i} (.*?)  TO', text)
+        if m:
+            return m.group(1).strip()
 
-    database[id_col] = pd.to_numeric(database[id_col], errors="coerce")
+    # MODEL 6
+    m = re.search(r'FROM (.*?) LA', text)
+    if m:
+        return m.group(1).strip()
 
-    valid = database[database["KODE_UNIK"] != "N/A"]
-    anomali = database[database["KODE_UNIK"] == "N/A"]
+    # MODEL 7
+    m = re.search(r'FROM (.*?) ATM', text)
+    if m:
+        return m.group(1).strip()
 
-    valid = valid.drop_duplicates(subset=[id_col, "KODE_UNIK"])
+    return "N/A"
 
-    valid = valid.sort_values(id_col)
 
-    hasil = pd.concat([valid, anomali]).reset_index(drop=True)
+# ===== LOAD FILE =====
+file = "BRI - Summary FY26.xlsx"
 
-    st.success("Database berhasil dibuat")
+header_row = detect_header(file)
 
-    st.write("Jumlah transaksi N/A:", len(anomali))
+df = pd.read_excel(file, header=header_row)
 
-    st.dataframe(hasil)
+id_col, uraian_col = detect_columns(df)
 
-    output = BytesIO()
-    hasil.to_excel(output, index=False)
+if uraian_col is None or id_col is None:
+    raise Exception("Kolom ID atau Uraian Transaksi tidak ditemukan")
 
-    st.download_button(
-        "Download DATABASE_HASIL.xlsx",
-        output.getvalue(),
-        "DATABASE_HASIL.xlsx"
-    )
+
+# ===== LOGIC SAMA PERSIS SEPERTI SCRIPT KAMU =====
+df["KODE_UNIK"] = df[uraian_col].apply(ambil_kode_unik)
+
+database = df[[id_col, "KODE_UNIK", uraian_col]]
+
+database = database.rename(columns={
+    id_col: "ID",
+    uraian_col: "Uraian Transaksi"
+})
+
+database["ID"] = pd.to_numeric(database["ID"], errors="coerce")
+
+valid = database[database["KODE_UNIK"] != "N/A"].copy()
+anomali = database[database["KODE_UNIK"] == "N/A"].copy()
+
+valid = valid.drop_duplicates(subset=["ID","KODE_UNIK"])
+
+valid = valid.sort_values("ID")
+
+hasil = pd.concat([valid, anomali])
+
+hasil = hasil.reset_index(drop=True)
+
+hasil.to_excel("DATABASE_HASIL.xlsx", index=False)
+
+print("Database selesai dibuat")
+print("Jumlah N/A :", len(anomali))
