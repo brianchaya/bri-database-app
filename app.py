@@ -5,8 +5,10 @@ from io import BytesIO
 
 st.title("BRI Transaction Database Generator")
 
-uploaded_file = st.file_uploader("Upload File Excel", type=["xlsx"])
-
+uploaded_file = st.file_uploader(
+    "Upload File (.xlsx / .xls / .csv)",
+    type=["xlsx", "xls", "csv"]
+)
 
 # ==============================
 # EXTRACT UNIQUE CODE
@@ -18,38 +20,31 @@ def ambil_kode_unik(text):
 
     text = str(text)
 
-    # MODEL 1
     m = re.search(r'BFVA11167000(\d{5})', text)
     if m:
         return m.group(1)
 
-    # MODEL 3
     m = re.search(r'BRIVA11167000(\d{5})', text)
     if m:
         return m.group(1)
 
-    # MODEL 2
     m = re.search(r'NBMB\s(.*?)\sTO', text)
     if m:
         return m.group(1).strip()
 
-    # MODEL 4
     m = re.search(r'301([A-Z\s]+?):', text)
     if m:
         return m.group(1).strip()
 
-    # MODEL 5 ATM0-ATM9
     for i in range(10):
         m = re.search(fr'ATM{i} ATM{i} (.*?)  TO', text)
         if m:
             return m.group(1).strip()
 
-    # MODEL 6
     m = re.search(r'FROM (.*?) LA', text)
     if m:
         return m.group(1).strip()
 
-    # MODEL 7
     m = re.search(r'FROM (.*?) ATM', text)
     if m:
         return m.group(1).strip()
@@ -65,6 +60,7 @@ def detect_header(file):
     preview = pd.read_excel(file, header=None, nrows=20)
 
     for i in range(20):
+
         row = preview.iloc[i].astype(str).str.lower()
 
         if any("uraian" in cell for cell in row):
@@ -101,12 +97,22 @@ if uploaded_file:
 
     try:
 
-        # detect header
-        header_row = detect_header(uploaded_file)
+        # ==============================
+        # LOAD FILE
+        # ==============================
+        if uploaded_file.name.endswith(".csv"):
 
-        df = pd.read_excel(uploaded_file, header=header_row)
+            df = pd.read_csv(uploaded_file, sep=None, engine="python")
 
-        # detect column
+        else:
+
+            header_row = detect_header(uploaded_file)
+
+            df = pd.read_excel(uploaded_file, header=header_row)
+
+        # ==============================
+        # DETECT COLUMNS
+        # ==============================
         id_col, uraian_col = detect_columns(df)
 
         if uraian_col is None:
@@ -119,37 +125,32 @@ if uploaded_file:
             st.write("Kolom yang tersedia:", df.columns)
             st.stop()
 
-        # ekstrak kode unik
+        # ==============================
+        # PROCESS DATA
+        # ==============================
         df["KODE_UNIK"] = df[uraian_col].apply(ambil_kode_unik)
 
         database = df[[id_col, "KODE_UNIK", uraian_col]].copy()
 
-        # rename supaya konsisten
         database = database.rename(columns={
             id_col: "ID",
             uraian_col: "Uraian Transaksi"
         })
 
-        # convert ID
         database["ID"] = pd.to_numeric(database["ID"], errors="coerce")
 
-        # pisahkan valid dan N/A
         valid = database[database["KODE_UNIK"] != "N/A"].copy()
         anomali = database[database["KODE_UNIK"] == "N/A"].copy()
 
-        # hapus duplikat
-        valid = valid.drop_duplicates(subset=["ID","KODE_UNIK"])
+        valid = valid.drop_duplicates(subset=["ID", "KODE_UNIK"])
 
-        # sort ID
         valid = valid.sort_values("ID")
 
-        # gabungkan
         hasil = pd.concat([valid, anomali], ignore_index=True)
 
         # ==============================
         # DASHBOARD INFO
         # ==============================
-
         col1, col2, col3 = st.columns(3)
 
         col1.metric("Total transaksi", len(database))
@@ -161,10 +162,10 @@ if uploaded_file:
         st.dataframe(hasil)
 
         # ==============================
-        # DOWNLOAD
+        # DOWNLOAD FILE
         # ==============================
-
         output = BytesIO()
+
         hasil.to_excel(output, index=False)
 
         st.download_button(
