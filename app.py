@@ -6,15 +6,15 @@ from io import BytesIO
 st.title("BRI Transaction Database Generator (Advanced)")
 
 # ==============================
-# UPLOAD FILES
+# UPLOAD
 # ==============================
-uploaded_file = st.file_uploader("Upload Rekening Koran", type=["xlsx","xls","csv"])
+uploaded_file = st.file_uploader("Upload Bank Statement", type=["xlsx","xls","csv"])
 existing_file = st.file_uploader("Attach Existing Database (Optional)", type=["xlsx"])
 
 # ==============================
 # EXTRACT UNIQUE CODE
 # ==============================
-def ambil_kode_unik(text):
+def extract_code(text):
 
     if pd.isna(text):
         return "N/A"
@@ -39,39 +39,60 @@ def ambil_kode_unik(text):
     return "N/A"
 
 # ==============================
-# LOAD MULTI SHEET
+# SMART LOAD (MULTI SHEET)
 # ==============================
-def load_file(file):
+def load_statement(file):
 
     if file.name.endswith(".csv"):
         return pd.read_csv(file)
 
     xls = pd.ExcelFile(file)
 
-    for i in range(min(10, len(xls.sheet_names))):
-        df = pd.read_excel(xls, sheet_name=i)
+    for sheet in xls.sheet_names[:10]:
+
+        df = pd.read_excel(xls, sheet_name=sheet)
 
         cols = [str(c).lower() for c in df.columns]
 
-        if any("uraian" in c for c in cols) and "id" in cols:
+        if any("uraian" in c or "description" in c for c in cols):
+            if any("id" in c for c in cols):
+                return df
+
+    # fallback → return first sheet
+    return pd.read_excel(xls, sheet_name=0)
+
+# ==============================
+# LOAD EXISTING DATABASE (NO REPROCESS)
+# ==============================
+def load_existing(file):
+
+    xls = pd.ExcelFile(file)
+
+    for sheet in xls.sheet_names[:10]:
+        df = pd.read_excel(xls, sheet_name=sheet)
+
+        cols = [str(c).lower() for c in df.columns]
+
+        if "kode_unik" in cols and "id" in cols:
             return df
 
-    return None
+    return pd.read_excel(xls, sheet_name=0)
 
 # ==============================
-# CLEAN & PREP
+# PREPARE NEW DATA
 # ==============================
-def prepare_database(df):
+def prepare_new(df):
 
     df.columns = df.columns.str.strip()
 
-    uraian_col = [c for c in df.columns if "uraian" in c.lower()][0]
-    id_col = [c for c in df.columns if c.lower() == "id"][0]
+    # auto detect columns
+    id_col = [c for c in df.columns if "id" in c.lower()][0]
+    desc_col = [c for c in df.columns if "uraian" in c.lower() or "description" in c.lower()][0]
 
-    df["KODE_UNIK"] = df[uraian_col].apply(ambil_kode_unik)
+    df["KODE_UNIK"] = df[desc_col].apply(extract_code)
 
-    db = df[[id_col, "KODE_UNIK", uraian_col]].copy()
-    db.columns = ["ID", "KODE_UNIK", "Uraian"]
+    db = df[[id_col, "KODE_UNIK", desc_col]].copy()
+    db.columns = ["ID", "KODE_UNIK", "Description"]
 
     db["ID"] = pd.to_numeric(db["ID"], errors="coerce")
 
@@ -82,40 +103,32 @@ def prepare_database(df):
 # ==============================
 def grouping(db):
 
-    db = db.drop_duplicates(subset=["ID","KODE_UNIK","Uraian"])
+    db = db.drop_duplicates(subset=["ID","KODE_UNIK","Description"])
 
-    # remove empty N/A
-    db = db[~((db["KODE_UNIK"]=="N/A") & (db["Uraian"].isna()))]
+    # remove empty NA
+    db = db[~((db["KODE_UNIK"]=="N/A") & (db["Description"].isna()))]
 
-    # ==================
-    # GROUP DOUBLE
-    # ==================
+    # GROUP BY CODE
     grouped = db.groupby("KODE_UNIK").agg({
-        "ID": lambda x: " ; ".join(sorted(set(x.astype(str)))),
-        "Uraian": lambda x: " ; ".join(x.astype(str))
+        "ID": lambda x: " ; ".join(sorted(set(x.dropna().astype(int).astype(str)))),
+        "Description": lambda x: " ; ".join(x.astype(str))
     }).reset_index()
 
-    # detect double
     grouped["TYPE"] = grouped["ID"].apply(lambda x: "DOUBLE" if ";" in x else "NORMAL")
 
-    # ==================
-    # N/A
-    # ==================
+    # NA
     na = db[db["KODE_UNIK"]=="N/A"].copy()
     na["TYPE"] = "NA"
 
-    # ==================
-    # FINAL SPLIT
-    # ==================
     normal = grouped[grouped["TYPE"]=="NORMAL"]
     double = grouped[grouped["TYPE"]=="DOUBLE"]
 
     return normal, double, na
 
 # ==============================
-# MERGE EXISTING
+# MERGE EXISTING + NEW
 # ==============================
-def merge_existing(existing, new):
+def merge_db(existing, new):
 
     combined = pd.concat([existing, new], ignore_index=True)
 
@@ -124,56 +137,54 @@ def merge_existing(existing, new):
     return normal, double, na
 
 # ==============================
-# MAIN PROCESS
+# MAIN
 # ==============================
 if uploaded_file:
 
-    df = load_file(uploaded_file)
+    df = load_statement(uploaded_file)
+    new_db = prepare_new(df)
 
-    if df is None:
-        st.error("Format tidak dikenali")
-        st.stop()
-
-    db = prepare_database(df)
-
-    # ==============================
-    # HANDLE EXISTING
-    # ==============================
     if existing_file:
 
-        df_exist = load_file(existing_file)
-        db_exist = prepare_database(df_exist)
+        exist_df = load_existing(existing_file)
 
-        normal, double, na = merge_existing(db_exist, db)
+        # normalize column name if needed
+        exist_df.columns = [c.upper() for c in exist_df.columns]
 
-        st.info("Mode: UPDATE DATABASE")
+        if "DESCRIPTION" not in exist_df.columns:
+            exist_df["DESCRIPTION"] = ""
+
+        exist_df = exist_df[["ID","KODE_UNIK","DESCRIPTION"]]
+        exist_df.columns = ["ID","KODE_UNIK","Description"]
+
+        normal, double, na = merge_db(exist_df, new_db)
+
+        st.success("Mode: UPDATE DATABASE")
 
     else:
 
-        normal, double, na = grouping(db)
+        normal, double, na = grouping(new_db)
 
-        st.info("Mode: CREATE DATABASE BARU")
+        st.success("Mode: CREATE NEW DATABASE")
 
     # ==============================
     # DASHBOARD
     # ==============================
     col1, col2, col3 = st.columns(3)
 
-    col1.metric("Normal", len(normal))
-    col2.metric("Double", len(double))
-    col3.metric("N/A", len(na))
+    col1.metric("Normal Rows", len(normal))
+    col2.metric("Merged Rows", len(double))
+    col3.metric("Need Review (N/A)", len(na))
 
     # ==============================
-    # DISPLAY
+    # FINAL TABLE
     # ==============================
-    st.subheader("DATA")
-
     final = pd.concat([normal, double, na], ignore_index=True)
 
     st.dataframe(final)
 
     # ==============================
-    # EXPORT EXCEL WITH COLOR
+    # EXPORT EXCEL (COLORED)
     # ==============================
     output = BytesIO()
 
