@@ -2,17 +2,18 @@ import streamlit as st
 import pandas as pd
 import re
 from io import BytesIO
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill
 
 st.title("BRI Transaction Database Generator")
 
-uploaded_file = st.file_uploader(
-    "Upload File (.xlsx / .xls / .csv)",
-    type=["xlsx", "xls", "csv"]
-)
+rk_file = st.file_uploader("Upload Rekening Koran", type=["xlsx","xls","csv"])
+existing_db_file = st.file_uploader("Upload Existing Database (optional)", type=["xlsx"])
 
-# ==============================
-# EXTRACT UNIQUE CODE
-# ==============================
+
+# ==========================================
+# BRI UNIQUE CODE EXTRACTOR (TIDAK DIUBAH)
+# ==========================================
 def ambil_kode_unik(text):
 
     if pd.isna(text):
@@ -52,130 +53,192 @@ def ambil_kode_unik(text):
     return "N/A"
 
 
-# ==============================
-# DETECT HEADER
-# ==============================
-def detect_header(file):
+# ==========================================
+# DETECT RK SHEET
+# ==========================================
+def detect_rk_sheet(excel):
 
-    preview = pd.read_excel(file, header=None, nrows=20)
+    for sheet in excel.sheet_names[:10]:
 
-    for i in range(20):
+        df = pd.read_excel(excel, sheet_name=sheet, nrows=10)
 
-        row = preview.iloc[i].astype(str).str.lower()
+        cols = [str(c).lower() for c in df.columns]
 
-        if any("uraian" in cell for cell in row):
-            return i
+        if any(x in c for c in cols for x in ["uraian","description","deskripsi","transaksi"]):
+            return sheet
 
-    return 0
+    return excel.sheet_names[0]
 
 
-# ==============================
-# DETECT COLUMNS
-# ==============================
-def detect_columns(df):
-
-    df.columns = df.columns.str.strip()
-
-    uraian_col = None
-    id_col = None
+# ==========================================
+# DETECT TRANSACTION COLUMN
+# ==========================================
+def detect_desc_column(df):
 
     for col in df.columns:
 
-        if "uraian" in col.lower():
-            uraian_col = col
+        name = str(col).lower()
 
-        if col.lower() == "id":
-            id_col = col
+        if any(x in name for x in ["uraian","description","deskripsi","transaksi"]):
+            return col
 
-    return id_col, uraian_col
+    # fallback: kolom teks paling panjang
+    lengths = df.astype(str).apply(lambda x: x.str.len().mean())
+
+    return lengths.idxmax()
 
 
-# ==============================
-# MAIN PROCESS
-# ==============================
-if uploaded_file:
+# ==========================================
+# GROUP CONFLICT ENGINE
+# ==========================================
+def group_conflict(df):
 
-    try:
+    normal = []
+    conflict = []
 
-        # ==============================
-        # LOAD FILE
-        # ==============================
-        if uploaded_file.name.endswith(".csv"):
+    grouped = df.groupby("KODE_UNIK")
 
-            df = pd.read_csv(uploaded_file, sep=None, engine="python")
+    for kode, group in grouped:
+
+        ids = sorted(group["ID"].unique())
+
+        uraian = group["Uraian Transaksi"].tolist()
+
+        if len(ids) == 1:
+
+            normal.append({
+                "ID": ids[0],
+                "KODE_UNIK": kode,
+                "Uraian Transaksi": uraian[0]
+            })
 
         else:
 
-            header_row = detect_header(uploaded_file)
+            conflict.append({
+                "ID": " ; ".join(map(str,ids)),
+                "KODE_UNIK": kode,
+                "Uraian Transaksi": " ; ".join(uraian)
+            })
 
-            df = pd.read_excel(uploaded_file, header=header_row)
+    return pd.DataFrame(normal), pd.DataFrame(conflict)
 
-        # ==============================
-        # DETECT COLUMNS
-        # ==============================
-        id_col, uraian_col = detect_columns(df)
 
-        if uraian_col is None:
-            st.error("Kolom Uraian Transaksi tidak ditemukan.")
-            st.write("Kolom yang tersedia:", df.columns)
-            st.stop()
+# ==========================================
+# LOAD RK
+# ==========================================
+if rk_file:
 
-        if id_col is None:
-            st.error("Kolom ID tidak ditemukan.")
-            st.write("Kolom yang tersedia:", df.columns)
-            st.stop()
+    try:
 
-        # ==============================
-        # PROCESS DATA
-        # ==============================
-        df["KODE_UNIK"] = df[uraian_col].apply(ambil_kode_unik)
+        if rk_file.name.endswith(".csv"):
 
-        database = df[[id_col, "KODE_UNIK", uraian_col]].copy()
+            df = pd.read_csv(rk_file, sep=None, engine="python")
 
-        database = database.rename(columns={
-            id_col: "ID",
-            uraian_col: "Uraian Transaksi"
-        })
+        else:
+
+            excel = pd.ExcelFile(rk_file)
+
+            sheet = detect_rk_sheet(excel)
+
+            df = pd.read_excel(excel, sheet_name=sheet)
+
+        desc_col = detect_desc_column(df)
+
+        df["KODE_UNIK"] = df[desc_col].apply(ambil_kode_unik)
+
+        database = df[["ID","KODE_UNIK",desc_col]].copy()
+
+        database.columns = ["ID","KODE_UNIK","Uraian Transaksi"]
 
         database["ID"] = pd.to_numeric(database["ID"], errors="coerce")
 
-        valid = database[database["KODE_UNIK"] != "N/A"].copy()
-        anomali = database[database["KODE_UNIK"] == "N/A"].copy()
+        # remove empty uraian for NA
+        database = database[~((database["KODE_UNIK"]=="N/A") & (database["Uraian Transaksi"].isna()))]
 
-        valid = valid.drop_duplicates(subset=["ID", "KODE_UNIK"])
+        valid = database[database["KODE_UNIK"]!="N/A"].copy()
+        na_data = database[database["KODE_UNIK"]=="N/A"].copy()
 
-        valid = valid.sort_values("ID")
+        # ======================================
+        # REMOVE DUPLICATE
+        # ======================================
+        valid = valid.drop_duplicates(subset=["ID","KODE_UNIK"])
 
-        hasil = pd.concat([valid, anomali], ignore_index=True)
+        # ======================================
+        # EXISTING DATABASE CHECK
+        # ======================================
+        new_data = valid
 
-        # ==============================
-        # DASHBOARD INFO
-        # ==============================
-        col1, col2, col3 = st.columns(3)
+        if existing_db_file:
 
-        col1.metric("Total transaksi", len(database))
-        col2.metric("Database bersih", len(valid))
-        col3.metric("Perlu cek manual (N/A)", len(anomali))
+            excel_db = pd.ExcelFile(existing_db_file)
 
-        st.success("Database berhasil dibuat")
+            sheet_db = excel_db.sheet_names[0]
 
-        st.dataframe(hasil)
+            old_db = pd.read_excel(excel_db, sheet_name=sheet_db)
 
-        # ==============================
-        # DOWNLOAD FILE
-        # ==============================
+            existing_keys = set(zip(old_db["ID"].astype(str), old_db["KODE_UNIK"].astype(str)))
+
+            new_data = valid[~valid.apply(lambda r: (str(r["ID"]),str(r["KODE_UNIK"])) in existing_keys, axis=1)]
+
+        # ======================================
+        # GROUPING
+        # ======================================
+        normal, conflict = group_conflict(new_data)
+
+        normal = normal.sort_values("ID")
+        conflict = conflict.sort_values("ID")
+
+        # ======================================
+        # DASHBOARD
+        # ======================================
+        col1,col2,col3,col4 = st.columns(4)
+
+        col1.metric("Total transaksi",len(database))
+        col2.metric("Data normal",len(normal))
+        col3.metric("Data konflik",len(conflict))
+        col4.metric("N/A",len(na_data))
+
+        # ======================================
+        # CREATE EXCEL WITH COLORS
+        # ======================================
+        wb = Workbook()
+        ws = wb.active
+
+        ws.append(["ID","KODE_UNIK","Uraian Transaksi"])
+
+        yellow = PatternFill(start_color="FFFF00",fill_type="solid")
+        red = PatternFill(start_color="FF9999",fill_type="solid")
+
+        for _,row in normal.iterrows():
+            ws.append(row.tolist())
+
+        for _,row in conflict.iterrows():
+
+            ws.append(row.tolist())
+
+            for c in ws[ws.max_row]:
+                c.fill = yellow
+
+        for _,row in na_data.iterrows():
+
+            ws.append(row.tolist())
+
+            for c in ws[ws.max_row]:
+                c.fill = red
+
+        # ======================================
+        # DOWNLOAD
+        # ======================================
         output = BytesIO()
-
-        hasil.to_excel(output, index=False)
+        wb.save(output)
 
         st.download_button(
-            label="Download DATABASE_HASIL.xlsx",
-            data=output.getvalue(),
-            file_name="DATABASE_HASIL.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            "Download DATABASE_BRI.xlsx",
+            output.getvalue(),
+            "DATABASE_BRI.xlsx"
         )
 
     except Exception as e:
 
-        st.error("Terjadi error saat memproses file.")
+        st.error("Terjadi error saat memproses file")
         st.write(e)
