@@ -11,9 +11,9 @@ rk_file = st.file_uploader("Upload Rekening Koran", type=["xlsx","xls","csv"])
 existing_db_file = st.file_uploader("Upload Existing Database (optional)", type=["xlsx"])
 
 
-# ==============================
+# ======================================
 # EXTRACT UNIQUE CODE
-# ==============================
+# ======================================
 def ambil_kode_unik(text):
 
     if pd.isna(text):
@@ -53,77 +53,56 @@ def ambil_kode_unik(text):
     return "N/A"
 
 
-# ==============================
+# ======================================
 # DETECT RK SHEET
-# ==============================
-def detect_rk_sheet(excel):
+# ======================================
+def detect_sheet(excel):
 
     for sheet in excel.sheet_names[:10]:
 
-        df = pd.read_excel(excel, sheet_name=sheet, nrows=5)
+        df = pd.read_excel(excel, sheet_name=sheet, nrows=20)
 
-        cols = [str(c).lower() for c in df.columns]
+        text = df.astype(str).to_string().upper()
 
-        if any(x in c for c in cols for x in ["uraian","description","deskripsi","transaksi"]):
+        if any(x in text for x in ["NBMB","BRIVA","BFVA","ATM"]):
             return sheet
 
     return excel.sheet_names[0]
 
 
-# ==============================
-# DETECT HEADER
-# ==============================
-def detect_header(excel, sheet):
-
-    preview = pd.read_excel(excel, sheet_name=sheet, header=None, nrows=20)
-
-    for i in range(20):
-
-        row = preview.iloc[i].astype(str).str.lower()
-
-        if "id" in row.values:
-            return i
-
-    return 0
-
-
-# ==============================
+# ======================================
 # DETECT TRANSACTION COLUMN
-# ==============================
+# ======================================
 def detect_desc_column(df):
 
-    # 1. berdasarkan nama kolom
-    for col in df.columns:
-
-        name = str(col).lower()
-
-        if any(x in name for x in ["uraian","description","deskripsi","transaksi"]):
-            return col
-
-    # 2. fallback: kolom dengan huruf terbanyak
     scores = {}
 
     for col in df.columns:
 
-        sample = df[col].astype(str).head(100)
+        sample = df[col].astype(str).head(200).str.upper()
 
-        score = sample.str.contains(r'[A-Za-z]').sum()
+        score = (
+            sample.str.contains("NBMB").sum() +
+            sample.str.contains("BRIVA").sum() +
+            sample.str.contains("BFVA").sum() +
+            sample.str.contains("ATM").sum() +
+            sample.str.contains("FROM").sum()
+        )
 
         scores[col] = score
 
-    return max(scores, key=scores.get)
+    best_col = max(scores, key=scores.get)
+
+    return best_col
 
 
-# ==============================
+# ======================================
 # GROUP NORMAL / CONFLICT
-# ==============================
+# ======================================
 def group_conflict(df):
 
     normal = []
     conflict = []
-
-    if df.empty:
-        return pd.DataFrame(), pd.DataFrame()
 
     grouped = df.groupby("KODE_UNIK")
 
@@ -132,7 +111,7 @@ def group_conflict(df):
         ids = sorted(group["ID"].unique())
         uraian = group["Uraian Transaksi"].tolist()
 
-        if len(ids) <= 1:
+        if len(ids) == 1:
 
             normal.append({
                 "ID": ids[0],
@@ -151,48 +130,43 @@ def group_conflict(df):
     return pd.DataFrame(normal), pd.DataFrame(conflict)
 
 
-# ==============================
-# MAIN PROCESS
-# ==============================
+# ======================================
+# MAIN
+# ======================================
 if rk_file:
 
     try:
 
         if rk_file.name.endswith(".csv"):
-
             df = pd.read_csv(rk_file)
-
         else:
 
             excel = pd.ExcelFile(rk_file)
 
-            sheet = detect_rk_sheet(excel)
+            sheet = detect_sheet(excel)
 
-            header = detect_header(excel, sheet)
-
-            df = pd.read_excel(excel, sheet_name=sheet, header=header)
+            df = pd.read_excel(excel, sheet_name=sheet)
 
         df.columns = df.columns.str.strip()
 
         if "ID" not in df.columns:
 
-            st.error("Kolom ID tidak ditemukan di rekening koran.")
+            st.error("Kolom ID tidak ditemukan.")
             st.stop()
 
         desc_col = detect_desc_column(df)
 
+        st.write("Kolom transaksi:", desc_col)
+
         df["KODE_UNIK"] = df[desc_col].apply(ambil_kode_unik)
 
         database = df[["ID","KODE_UNIK",desc_col]].copy()
+
         database.columns = ["ID","KODE_UNIK","Uraian Transaksi"]
 
         database["ID"] = pd.to_numeric(database["ID"], errors="coerce")
 
         database = database.dropna(subset=["ID"])
-
-        database = database[
-            ~((database["KODE_UNIK"]=="N/A") & (database["Uraian Transaksi"].isna()))
-        ]
 
         valid = database[database["KODE_UNIK"]!="N/A"]
         na_data = database[database["KODE_UNIK"]=="N/A"]
@@ -216,14 +190,11 @@ if rk_file:
 
         normal, conflict = group_conflict(new_data)
 
-        st.success("Database berhasil dibuat")
+        col1,col2,col3 = st.columns(3)
 
-        col1,col2,col3,col4 = st.columns(4)
-
-        col1.metric("Total transaksi",len(database))
-        col2.metric("Data normal",len(normal))
-        col3.metric("Data konflik",len(conflict))
-        col4.metric("N/A",len(na_data))
+        col1.metric("Data normal",len(normal))
+        col2.metric("Data konflik",len(conflict))
+        col3.metric("N/A",len(na_data))
 
         wb = Workbook()
         ws = wb.active
