@@ -3,7 +3,7 @@ import pandas as pd
 import re
 from io import BytesIO
 
-st.title("BRI Transaction Database Generator (Advanced)")
+st.title("BRI Transaction Database Generator (Advanced Stable)")
 
 # ==============================
 # UPLOAD
@@ -39,7 +39,7 @@ def extract_code(text):
     return "N/A"
 
 # ==============================
-# SMART LOAD (MULTI SHEET)
+# SMART LOAD (MULTI SHEET + HEADER SCAN)
 # ==============================
 def load_statement(file):
 
@@ -50,19 +50,20 @@ def load_statement(file):
 
     for sheet in xls.sheet_names[:10]:
 
-        df = pd.read_excel(xls, sheet_name=sheet)
+        preview = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=20)
 
-        cols = [str(c).lower() for c in df.columns]
+        for i in range(len(preview)):
+            row = preview.iloc[i].astype(str).str.lower()
 
-        if any("uraian" in c or "description" in c for c in cols):
-            if any("id" in c for c in cols):
+            if any("uraian" in x or "description" in x for x in row):
+                df = pd.read_excel(xls, sheet_name=sheet, header=i)
                 return df
 
-    # fallback → return first sheet
+    # fallback
     return pd.read_excel(xls, sheet_name=0)
 
 # ==============================
-# LOAD EXISTING DATABASE (NO REPROCESS)
+# LOAD EXISTING DATABASE
 # ==============================
 def load_existing(file):
 
@@ -79,16 +80,49 @@ def load_existing(file):
     return pd.read_excel(xls, sheet_name=0)
 
 # ==============================
-# PREPARE NEW DATA
+# PREPARE NEW DATA (ROBUST)
 # ==============================
 def prepare_new(df):
 
-    df.columns = df.columns.str.strip()
+    if df is None or df.empty:
+        st.error("File could not be read properly.")
+        st.stop()
 
-    # auto detect columns
-    id_col = [c for c in df.columns if "id" in c.lower()][0]
-    desc_col = [c for c in df.columns if "uraian" in c.lower() or "description" in c.lower()][0]
+    df.columns = df.columns.astype(str).str.strip()
 
+    # =========================
+    # DETECT ID COLUMN
+    # =========================
+    id_candidates = [
+        c for c in df.columns
+        if any(k in c.lower() for k in ["id", "no", "nomor"])
+    ]
+
+    if len(id_candidates) == 0:
+        st.error("ID column not found.")
+        st.write("Detected columns:", list(df.columns))
+        st.stop()
+
+    id_col = id_candidates[0]
+
+    # =========================
+    # DETECT DESCRIPTION
+    # =========================
+    desc_candidates = [
+        c for c in df.columns
+        if any(k in c.lower() for k in ["uraian", "description", "desc"])
+    ]
+
+    if len(desc_candidates) == 0:
+        st.error("Description column not found.")
+        st.write("Detected columns:", list(df.columns))
+        st.stop()
+
+    desc_col = desc_candidates[0]
+
+    # =========================
+    # PROCESS
+    # =========================
     df["KODE_UNIK"] = df[desc_col].apply(extract_code)
 
     db = df[[id_col, "KODE_UNIK", desc_col]].copy()
@@ -99,7 +133,7 @@ def prepare_new(df):
     return db
 
 # ==============================
-# GROUPING LOGIC
+# GROUPING LOGIC (MERGE SYSTEM)
 # ==============================
 def grouping(db):
 
@@ -108,7 +142,9 @@ def grouping(db):
     # remove empty NA
     db = db[~((db["KODE_UNIK"]=="N/A") & (db["Description"].isna()))]
 
-    # GROUP BY CODE
+    # =========================
+    # GROUP BY KODE_UNIK
+    # =========================
     grouped = db.groupby("KODE_UNIK").agg({
         "ID": lambda x: " ; ".join(sorted(set(x.dropna().astype(int).astype(str)))),
         "Description": lambda x: " ; ".join(x.astype(str))
@@ -116,7 +152,9 @@ def grouping(db):
 
     grouped["TYPE"] = grouped["ID"].apply(lambda x: "DOUBLE" if ";" in x else "NORMAL")
 
-    # NA
+    # =========================
+    # N/A
+    # =========================
     na = db[db["KODE_UNIK"]=="N/A"].copy()
     na["TYPE"] = "NA"
 
@@ -148,7 +186,6 @@ if uploaded_file:
 
         exist_df = load_existing(existing_file)
 
-        # normalize column name if needed
         exist_df.columns = [c.upper() for c in exist_df.columns]
 
         if "DESCRIPTION" not in exist_df.columns:
@@ -177,14 +214,17 @@ if uploaded_file:
     col3.metric("Need Review (N/A)", len(na))
 
     # ==============================
-    # FINAL TABLE
+    # FINAL TABLE (ORDERED)
     # ==============================
+    normal = normal.sort_values(by="ID")
+    double = double.sort_values(by="ID")
+
     final = pd.concat([normal, double, na], ignore_index=True)
 
     st.dataframe(final)
 
     # ==============================
-    # EXPORT EXCEL (COLORED)
+    # EXPORT EXCEL (WITH COLORS)
     # ==============================
     output = BytesIO()
 
