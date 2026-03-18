@@ -2,256 +2,201 @@ import streamlit as st
 import pandas as pd
 import re
 from io import BytesIO
-from openpyxl import Workbook
-from openpyxl.styles import PatternFill
 
-st.title("BRI Transaction Database Generator")
-
-rk_file = st.file_uploader("Upload Rekening Koran", type=["xlsx","xls","csv"])
-existing_db_file = st.file_uploader("Upload Existing Database (optional)", type=["xlsx"])
-
+st.title("BRI Transaction Database Generator (Advanced)")
 
 # ==============================
-# BRI UNIQUE CODE EXTRACTOR
+# UPLOAD FILES
+# ==============================
+uploaded_file = st.file_uploader("Upload Rekening Koran", type=["xlsx","xls","csv"])
+existing_file = st.file_uploader("Attach Existing Database (Optional)", type=["xlsx"])
+
+# ==============================
+# EXTRACT UNIQUE CODE
 # ==============================
 def ambil_kode_unik(text):
 
     if pd.isna(text):
         return "N/A"
 
-    text = str(text).upper()
+    text = str(text)
 
-    m = re.search(r'BFVA11167000(\d{5})', text)
-    if m:
-        return m.group(1)
+    patterns = [
+        r'BFVA11167000(\d{5})',
+        r'BRIVA11167000(\d{5})',
+        r'NBMB\s(.*?)\sTO',
+        r'301([A-Z\s]+?):',
+        r'ATM\d ATM\d (.*?)  TO',
+        r'FROM (.*?) LA',
+        r'FROM (.*?) ATM'
+    ]
 
-    m = re.search(r'BRIVA11167000(\d{5})', text)
-    if m:
-        return m.group(1)
-
-    m = re.search(r'NBMB\s(.*?)\sTO', text)
-    if m:
-        return m.group(1).strip()
-
-    m = re.search(r'301([A-Z\s]+?):', text)
-    if m:
-        return m.group(1).strip()
-
-    for i in range(10):
-        m = re.search(fr'ATM{i} ATM{i} (.*?)  TO', text)
+    for p in patterns:
+        m = re.search(p, text)
         if m:
             return m.group(1).strip()
 
-    m = re.search(r'FROM (.*?) LA', text)
-    if m:
-        return m.group(1).strip()
-
-    m = re.search(r'FROM (.*?) ATM', text)
-    if m:
-        return m.group(1).strip()
-
     return "N/A"
 
+# ==============================
+# LOAD MULTI SHEET
+# ==============================
+def load_file(file):
+
+    if file.name.endswith(".csv"):
+        return pd.read_csv(file)
+
+    xls = pd.ExcelFile(file)
+
+    for i in range(min(10, len(xls.sheet_names))):
+        df = pd.read_excel(xls, sheet_name=i)
+
+        cols = [str(c).lower() for c in df.columns]
+
+        if any("uraian" in c for c in cols) and "id" in cols:
+            return df
+
+    return None
 
 # ==============================
-# DETECT SHEET
+# CLEAN & PREP
 # ==============================
-def detect_sheet(excel):
+def prepare_database(df):
 
-    for sheet in excel.sheet_names[:10]:
+    df.columns = df.columns.str.strip()
 
-        df = pd.read_excel(excel, sheet_name=sheet, nrows=20)
+    uraian_col = [c for c in df.columns if "uraian" in c.lower()][0]
+    id_col = [c for c in df.columns if c.lower() == "id"][0]
 
-        text = df.astype(str).to_string().upper()
+    df["KODE_UNIK"] = df[uraian_col].apply(ambil_kode_unik)
 
-        if any(x in text for x in ["NBMB","BRIVA","BFVA","ATM","FROM"]):
-            return sheet
+    db = df[[id_col, "KODE_UNIK", uraian_col]].copy()
+    db.columns = ["ID", "KODE_UNIK", "Uraian"]
 
-    return excel.sheet_names[0]
+    db["ID"] = pd.to_numeric(db["ID"], errors="coerce")
 
-
-# ==============================
-# DETECT HEADER
-# ==============================
-def detect_header(excel, sheet):
-
-    preview = pd.read_excel(excel, sheet_name=sheet, header=None, nrows=20)
-
-    for i in range(20):
-
-        row = preview.iloc[i].astype(str).str.lower()
-
-        if any(x in row.values for x in ["id","no","ref"]):
-            return i
-
-    return 0
-
+    return db
 
 # ==============================
-# DETECT ID COLUMN
+# GROUPING LOGIC
 # ==============================
-def detect_id_column(df):
+def grouping(db):
 
-    for col in df.columns:
+    db = db.drop_duplicates(subset=["ID","KODE_UNIK","Uraian"])
 
-        name = str(col).lower()
+    # remove empty N/A
+    db = db[~((db["KODE_UNIK"]=="N/A") & (db["Uraian"].isna()))]
 
-        if name in ["id","no","no.","ref","reference"]:
-            return col
+    # ==================
+    # GROUP DOUBLE
+    # ==================
+    grouped = db.groupby("KODE_UNIK").agg({
+        "ID": lambda x: " ; ".join(sorted(set(x.astype(str)))),
+        "Uraian": lambda x: " ; ".join(x.astype(str))
+    }).reset_index()
 
-    numeric_scores = {}
+    # detect double
+    grouped["TYPE"] = grouped["ID"].apply(lambda x: "DOUBLE" if ";" in x else "NORMAL")
 
-    for col in df.columns:
+    # ==================
+    # N/A
+    # ==================
+    na = db[db["KODE_UNIK"]=="N/A"].copy()
+    na["TYPE"] = "NA"
 
-        series = pd.to_numeric(df[col], errors="coerce")
+    # ==================
+    # FINAL SPLIT
+    # ==================
+    normal = grouped[grouped["TYPE"]=="NORMAL"]
+    double = grouped[grouped["TYPE"]=="DOUBLE"]
 
-        numeric_scores[col] = series.nunique()
-
-    return max(numeric_scores, key=numeric_scores.get)
-
-
-# ==============================
-# DETECT TRANSACTION COLUMN
-# ==============================
-def detect_desc_column(df):
-
-    scores = {}
-
-    for col in df.columns:
-
-        sample = df[col].astype(str).head(200).str.upper()
-
-        score = (
-            sample.str.contains("NBMB").sum() +
-            sample.str.contains("BRIVA").sum() +
-            sample.str.contains("BFVA").sum() +
-            sample.str.contains("ATM").sum() +
-            sample.str.contains("FROM").sum()
-        )
-
-        scores[col] = score
-
-    return max(scores, key=scores.get)
-
+    return normal, double, na
 
 # ==============================
-# GROUP CONFLICT
+# MERGE EXISTING
 # ==============================
-def group_conflict(df):
+def merge_existing(existing, new):
 
-    normal = []
-    conflict = []
+    combined = pd.concat([existing, new], ignore_index=True)
 
-    grouped = df.groupby("KODE_UNIK")
+    normal, double, na = grouping(combined)
 
-    for kode, group in grouped:
-
-        ids = sorted(group["ID"].unique())
-        uraian = group["Uraian Transaksi"].tolist()
-
-        if len(ids) == 1:
-
-            normal.append({
-                "ID": ids[0],
-                "KODE_UNIK": kode,
-                "Uraian Transaksi": uraian[0]
-            })
-
-        else:
-
-            conflict.append({
-                "ID": " ; ".join(map(str,ids)),
-                "KODE_UNIK": kode,
-                "Uraian Transaksi": " ; ".join(uraian)
-            })
-
-    return pd.DataFrame(normal), pd.DataFrame(conflict)
-
+    return normal, double, na
 
 # ==============================
 # MAIN PROCESS
 # ==============================
-if rk_file:
+if uploaded_file:
 
-    try:
+    df = load_file(uploaded_file)
 
-        if rk_file.name.endswith(".csv"):
+    if df is None:
+        st.error("Format tidak dikenali")
+        st.stop()
 
-            df = pd.read_csv(rk_file)
+    db = prepare_database(df)
 
-        else:
+    # ==============================
+    # HANDLE EXISTING
+    # ==============================
+    if existing_file:
 
-            excel = pd.ExcelFile(rk_file)
+        df_exist = load_file(existing_file)
+        db_exist = prepare_database(df_exist)
 
-            sheet = detect_sheet(excel)
+        normal, double, na = merge_existing(db_exist, db)
 
-            header = detect_header(excel, sheet)
+        st.info("Mode: UPDATE DATABASE")
 
-            df = pd.read_excel(excel, sheet_name=sheet, header=header)
+    else:
 
-        df.columns = df.columns.str.strip()
+        normal, double, na = grouping(db)
 
-        id_col = detect_id_column(df)
+        st.info("Mode: CREATE DATABASE BARU")
 
-        desc_col = detect_desc_column(df)
+    # ==============================
+    # DASHBOARD
+    # ==============================
+    col1, col2, col3 = st.columns(3)
 
-        st.write("Kolom ID terdeteksi:", id_col)
-        st.write("Kolom transaksi terdeteksi:", desc_col)
+    col1.metric("Normal", len(normal))
+    col2.metric("Double", len(double))
+    col3.metric("N/A", len(na))
 
-        df["KODE_UNIK"] = df[desc_col].apply(ambil_kode_unik)
+    # ==============================
+    # DISPLAY
+    # ==============================
+    st.subheader("DATA")
 
-        database = df[[id_col,"KODE_UNIK",desc_col]].copy()
+    final = pd.concat([normal, double, na], ignore_index=True)
 
-        database.columns = ["ID","KODE_UNIK","Uraian Transaksi"]
+    st.dataframe(final)
 
-        database["ID"] = pd.to_numeric(database["ID"], errors="coerce")
+    # ==============================
+    # EXPORT EXCEL WITH COLOR
+    # ==============================
+    output = BytesIO()
 
-        database = database.dropna(subset=["ID"])
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
 
-        valid = database[database["KODE_UNIK"]!="N/A"]
-        na_data = database[database["KODE_UNIK"]=="N/A"]
+        final.to_excel(writer, index=False, sheet_name="Database")
 
-        valid = valid.drop_duplicates(subset=["ID","KODE_UNIK"])
+        workbook = writer.book
+        worksheet = writer.sheets["Database"]
 
-        normal, conflict = group_conflict(valid)
+        yellow = workbook.add_format({'bg_color': '#FFF59D'})
+        red = workbook.add_format({'bg_color': '#EF9A9A'})
 
-        col1,col2,col3 = st.columns(3)
+        for i, row in final.iterrows():
 
-        col1.metric("Data normal",len(normal))
-        col2.metric("Data konflik",len(conflict))
-        col3.metric("N/A",len(na_data))
+            if row["KODE_UNIK"] == "N/A":
+                worksheet.set_row(i+1, None, red)
 
-        wb = Workbook()
-        ws = wb.active
+            elif ";" in str(row["ID"]):
+                worksheet.set_row(i+1, None, yellow)
 
-        ws.append(["ID","KODE_UNIK","Uraian Transaksi"])
-
-        yellow = PatternFill(start_color="FFFF00",fill_type="solid")
-        red = PatternFill(start_color="FF9999",fill_type="solid")
-
-        for _,row in normal.iterrows():
-            ws.append(row.tolist())
-
-        for _,row in conflict.iterrows():
-            ws.append(row.tolist())
-            for c in ws[ws.max_row]:
-                c.fill = yellow
-
-        for _,row in na_data.iterrows():
-            ws.append(row.tolist())
-            for c in ws[ws.max_row]:
-                c.fill = red
-
-        output = BytesIO()
-        wb.save(output)
-
-        st.download_button(
-            "Download DATABASE_BRI.xlsx",
-            output.getvalue(),
-            "DATABASE_BRI.xlsx"
-        )
-
-    except Exception as e:
-
-        st.error("Terjadi error saat memproses file")
-        st.write(e)
+    st.download_button(
+        "Download Excel",
+        output.getvalue(),
+        "DATABASE_FINAL.xlsx"
+    )
