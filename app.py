@@ -12,7 +12,7 @@ existing_db_file = st.file_uploader("Upload Existing Database (optional)", type=
 
 
 # ==========================================
-# BRI UNIQUE CODE EXTRACTOR (TIDAK DIUBAH)
+# BRI UNIQUE CODE EXTRACTOR
 # ==========================================
 def ambil_kode_unik(text):
 
@@ -54,13 +54,30 @@ def ambil_kode_unik(text):
 
 
 # ==========================================
+# DETECT HEADER
+# ==========================================
+def detect_header(excel, sheet):
+
+    preview = pd.read_excel(excel, sheet_name=sheet, header=None, nrows=20)
+
+    for i in range(20):
+
+        row = preview.iloc[i].astype(str).str.lower()
+
+        if "id" in row.values:
+            return i
+
+    return 0
+
+
+# ==========================================
 # DETECT RK SHEET
 # ==========================================
 def detect_rk_sheet(excel):
 
     for sheet in excel.sheet_names[:10]:
 
-        df = pd.read_excel(excel, sheet_name=sheet, nrows=10)
+        df = pd.read_excel(excel, sheet_name=sheet, nrows=5)
 
         cols = [str(c).lower() for c in df.columns]
 
@@ -68,6 +85,24 @@ def detect_rk_sheet(excel):
             return sheet
 
     return excel.sheet_names[0]
+
+
+# ==========================================
+# DETECT ID COLUMN
+# ==========================================
+def detect_id_column(df):
+
+    for col in df.columns:
+
+        if str(col).strip().lower() == "id":
+            return col
+
+    for col in df.columns:
+
+        if "id" == str(col).strip().lower():
+            return col
+
+    raise Exception("Kolom ID tidak ditemukan")
 
 
 # ==========================================
@@ -82,54 +117,57 @@ def detect_desc_column(df):
         if any(x in name for x in ["uraian","description","deskripsi","transaksi"]):
             return col
 
-    # fallback: kolom teks paling panjang
+    # fallback: kolom teks terpanjang
     lengths = df.astype(str).apply(lambda x: x.str.len().mean())
 
     return lengths.idxmax()
 
 
 # ==========================================
-# GROUP CONFLICT ENGINE
+# GROUP CONFLICT
 # ==========================================
 def group_conflict(df):
 
-    normal = []
-    conflict = []
+    normal_rows = []
+    conflict_rows = []
 
     grouped = df.groupby("KODE_UNIK")
 
     for kode, group in grouped:
 
-        ids = sorted(group["ID"].unique())
+        ids = sorted(group["ID"].dropna().unique())
 
-        uraian = group["Uraian Transaksi"].tolist()
+        uraian = group["Uraian Transaksi"].dropna().tolist()
 
-        if len(ids) == 1:
+        if len(ids) <= 1:
 
-            normal.append({
-                "ID": ids[0],
+            normal_rows.append({
+                "ID": ids[0] if ids else None,
                 "KODE_UNIK": kode,
-                "Uraian Transaksi": uraian[0]
+                "Uraian Transaksi": uraian[0] if uraian else None
             })
 
         else:
 
-            conflict.append({
+            conflict_rows.append({
                 "ID": " ; ".join(map(str,ids)),
                 "KODE_UNIK": kode,
                 "Uraian Transaksi": " ; ".join(uraian)
             })
 
-    return pd.DataFrame(normal), pd.DataFrame(conflict)
+    return pd.DataFrame(normal_rows), pd.DataFrame(conflict_rows)
 
 
 # ==========================================
-# LOAD RK
+# MAIN PROCESS
 # ==========================================
 if rk_file:
 
     try:
 
+        # ======================
+        # LOAD RK
+        # ======================
         if rk_file.name.endswith(".csv"):
 
             df = pd.read_csv(rk_file, sep=None, engine="python")
@@ -138,59 +176,75 @@ if rk_file:
 
             excel = pd.ExcelFile(rk_file)
 
-            sheet = detect_rk_sheet(excel)
+            rk_sheet = detect_rk_sheet(excel)
 
-            df = pd.read_excel(excel, sheet_name=sheet)
+            header_row = detect_header(excel, rk_sheet)
+
+            df = pd.read_excel(excel, sheet_name=rk_sheet, header=header_row)
+
+        df.columns = df.columns.str.strip()
+
+        id_col = detect_id_column(df)
 
         desc_col = detect_desc_column(df)
 
+        # ======================
+        # EXTRACT
+        # ======================
         df["KODE_UNIK"] = df[desc_col].apply(ambil_kode_unik)
 
-        database = df[["ID","KODE_UNIK",desc_col]].copy()
+        database = df[[id_col,"KODE_UNIK",desc_col]].copy()
 
         database.columns = ["ID","KODE_UNIK","Uraian Transaksi"]
 
         database["ID"] = pd.to_numeric(database["ID"], errors="coerce")
 
-        # remove empty uraian for NA
+        # ======================
+        # CLEAN
+        # ======================
         database = database[~((database["KODE_UNIK"]=="N/A") & (database["Uraian Transaksi"].isna()))]
 
         valid = database[database["KODE_UNIK"]!="N/A"].copy()
         na_data = database[database["KODE_UNIK"]=="N/A"].copy()
 
-        # ======================================
-        # REMOVE DUPLICATE
-        # ======================================
         valid = valid.drop_duplicates(subset=["ID","KODE_UNIK"])
 
-        # ======================================
-        # EXISTING DATABASE CHECK
-        # ======================================
+        # ======================
+        # EXISTING DB CHECK
+        # ======================
         new_data = valid
 
         if existing_db_file:
 
             excel_db = pd.ExcelFile(existing_db_file)
 
-            sheet_db = excel_db.sheet_names[0]
+            db_sheet = excel_db.sheet_names[0]
 
-            old_db = pd.read_excel(excel_db, sheet_name=sheet_db)
+            old_db = pd.read_excel(excel_db, sheet_name=db_sheet)
 
-            existing_keys = set(zip(old_db["ID"].astype(str), old_db["KODE_UNIK"].astype(str)))
+            old_db["ID"] = old_db["ID"].astype(str)
+            old_db["KODE_UNIK"] = old_db["KODE_UNIK"].astype(str)
 
-            new_data = valid[~valid.apply(lambda r: (str(r["ID"]),str(r["KODE_UNIK"])) in existing_keys, axis=1)]
+            existing_keys = set(zip(old_db["ID"],old_db["KODE_UNIK"]))
 
-        # ======================================
-        # GROUPING
-        # ======================================
+            new_data = valid[
+                ~valid.apply(
+                    lambda r: (str(r["ID"]),str(r["KODE_UNIK"])) in existing_keys,
+                    axis=1
+                )
+            ]
+
+        # ======================
+        # GROUP
+        # ======================
         normal, conflict = group_conflict(new_data)
 
         normal = normal.sort_values("ID")
         conflict = conflict.sort_values("ID")
 
-        # ======================================
+        # ======================
         # DASHBOARD
-        # ======================================
+        # ======================
         col1,col2,col3,col4 = st.columns(4)
 
         col1.metric("Total transaksi",len(database))
@@ -198,9 +252,11 @@ if rk_file:
         col3.metric("Data konflik",len(conflict))
         col4.metric("N/A",len(na_data))
 
-        # ======================================
-        # CREATE EXCEL WITH COLORS
-        # ======================================
+        st.success("Database berhasil dibuat")
+
+        # ======================
+        # CREATE EXCEL
+        # ======================
         wb = Workbook()
         ws = wb.active
 
@@ -226,9 +282,9 @@ if rk_file:
             for c in ws[ws.max_row]:
                 c.fill = red
 
-        # ======================================
+        # ======================
         # DOWNLOAD
-        # ======================================
+        # ======================
         output = BytesIO()
         wb.save(output)
 
