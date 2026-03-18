@@ -11,9 +11,9 @@ rk_file = st.file_uploader("Upload Rekening Koran", type=["xlsx","xls","csv"])
 existing_db_file = st.file_uploader("Upload Existing Database (optional)", type=["xlsx"])
 
 
-# =====================================
-# BRI UNIQUE CODE EXTRACTOR
-# =====================================
+# =================================
+# EXTRACT UNIQUE CODE
+# =================================
 def ambil_kode_unik(text):
 
     if pd.isna(text):
@@ -53,10 +53,10 @@ def ambil_kode_unik(text):
     return "N/A"
 
 
-# =====================================
-# DETECT RK SHEET
-# =====================================
-def detect_rk_sheet(excel):
+# =================================
+# DETECT SHEET
+# =================================
+def detect_sheet(excel):
 
     for sheet in excel.sheet_names[:10]:
 
@@ -70,42 +70,9 @@ def detect_rk_sheet(excel):
     return excel.sheet_names[0]
 
 
-# =====================================
-# DETECT HEADER ROW
-# =====================================
-def detect_header(excel, sheet):
-
-    preview = pd.read_excel(excel, sheet_name=sheet, header=None, nrows=20)
-
-    for i in range(20):
-
-        row = preview.iloc[i].astype(str).str.lower()
-
-        if "id" in row.values:
-            return i
-
-    return 0
-
-
-# =====================================
-# DETECT ID COLUMN
-# =====================================
-def detect_id_column(df):
-
-    for col in df.columns:
-        if str(col).strip().lower() == "id":
-            return col
-
-    for col in df.columns:
-        if "id" in str(col).strip().lower():
-            return col
-
-    raise Exception("Kolom ID tidak ditemukan")
-
-
-# =====================================
+# =================================
 # DETECT TRANSACTION COLUMN
-# =====================================
+# =================================
 def detect_desc_column(df):
 
     for col in df.columns:
@@ -115,22 +82,20 @@ def detect_desc_column(df):
         if any(x in name for x in ["uraian","description","deskripsi","transaksi"]):
             return col
 
-    # fallback: kolom teks terpanjang
     lengths = df.astype(str).apply(lambda x: x.str.len().mean())
 
     return lengths.idxmax()
 
 
-# =====================================
-# GROUP CONFLICT
-# =====================================
+# =================================
+# GROUP NORMAL & CONFLICT
+# =================================
 def group_conflict(df):
 
-    normal_rows = []
-    conflict_rows = []
+    normal = []
+    conflict = []
 
     if df.empty:
-
         return (
             pd.DataFrame(columns=["ID","KODE_UNIK","Uraian Transaksi"]),
             pd.DataFrame(columns=["ID","KODE_UNIK","Uraian Transaksi"])
@@ -140,91 +105,73 @@ def group_conflict(df):
 
     for kode, group in grouped:
 
-        ids = sorted(group["ID"].dropna().unique())
-        uraian = group["Uraian Transaksi"].dropna().tolist()
+        ids = sorted(group["ID"].unique())
+        uraian = group["Uraian Transaksi"].tolist()
 
         if len(ids) <= 1:
 
-            normal_rows.append({
-                "ID": ids[0] if ids else None,
+            normal.append({
+                "ID": ids[0],
                 "KODE_UNIK": kode,
-                "Uraian Transaksi": uraian[0] if uraian else None
+                "Uraian Transaksi": uraian[0]
             })
 
         else:
 
-            conflict_rows.append({
+            conflict.append({
                 "ID": " ; ".join(map(str,ids)),
                 "KODE_UNIK": kode,
                 "Uraian Transaksi": " ; ".join(uraian)
             })
 
     return (
-        pd.DataFrame(normal_rows, columns=["ID","KODE_UNIK","Uraian Transaksi"]),
-        pd.DataFrame(conflict_rows, columns=["ID","KODE_UNIK","Uraian Transaksi"])
+        pd.DataFrame(normal),
+        pd.DataFrame(conflict)
     )
 
 
-# =====================================
+# =================================
 # MAIN PROCESS
-# =====================================
-if rk_file:
+# =================================
+if rk_file is not None:
 
     try:
 
         if rk_file.name.endswith(".csv"):
-
-            df = pd.read_csv(rk_file, sep=None, engine="python")
-
+            df = pd.read_csv(rk_file)
         else:
-
             excel = pd.ExcelFile(rk_file)
-
-            sheet = detect_rk_sheet(excel)
-
-            header_row = detect_header(excel, sheet)
-
-            df = pd.read_excel(excel, sheet_name=sheet, header=header_row)
+            sheet = detect_sheet(excel)
+            df = pd.read_excel(excel, sheet_name=sheet)
 
         df.columns = df.columns.str.strip()
 
-        id_col = detect_id_column(df)
+        if "ID" not in df.columns:
+            st.error("Kolom ID tidak ditemukan")
+            st.stop()
 
         desc_col = detect_desc_column(df)
 
         df["KODE_UNIK"] = df[desc_col].apply(ambil_kode_unik)
 
-        database = df[[id_col,"KODE_UNIK",desc_col]].copy()
-
+        database = df[["ID","KODE_UNIK",desc_col]].copy()
         database.columns = ["ID","KODE_UNIK","Uraian Transaksi"]
 
         database["ID"] = pd.to_numeric(database["ID"], errors="coerce")
-
         database = database.dropna(subset=["ID"])
 
-        database = database[
-            ~((database["KODE_UNIK"]=="N/A") & (database["Uraian Transaksi"].isna()))
-        ]
-
-        valid = database[database["KODE_UNIK"]!="N/A"].copy()
-        na_data = database[database["KODE_UNIK"]=="N/A"].copy()
+        valid = database[database["KODE_UNIK"]!="N/A"]
+        na_data = database[database["KODE_UNIK"]=="N/A"]
 
         valid = valid.drop_duplicates(subset=["ID","KODE_UNIK"])
 
         new_data = valid
 
-        if existing_db_file:
+        if existing_db_file is not None:
 
-            excel_db = pd.ExcelFile(existing_db_file)
+            old_db = pd.read_excel(existing_db_file)
 
-            sheet_db = excel_db.sheet_names[0]
-
-            old_db = pd.read_excel(excel_db, sheet_name=sheet_db)
-
-            old_db["ID"] = old_db["ID"].astype(str)
-            old_db["KODE_UNIK"] = old_db["KODE_UNIK"].astype(str)
-
-            existing_keys = set(zip(old_db["ID"],old_db["KODE_UNIK"]))
+            existing_keys = set(zip(old_db["ID"].astype(str),old_db["KODE_UNIK"].astype(str)))
 
             new_data = valid[
                 ~valid.apply(
@@ -235,20 +182,13 @@ if rk_file:
 
         normal, conflict = group_conflict(new_data)
 
-        if not normal.empty:
-            normal = normal.sort_values("ID")
-
-        if not conflict.empty:
-            conflict = conflict.sort_values("ID")
-
-        col1,col2,col3,col4 = st.columns(4)
-
-        col1.metric("Total transaksi",len(database))
-        col2.metric("Data normal",len(normal))
-        col3.metric("Data konflik",len(conflict))
-        col4.metric("N/A",len(na_data))
-
         st.success("Database berhasil dibuat")
+
+        col1,col2,col3 = st.columns(3)
+
+        col1.metric("Data normal",len(normal))
+        col2.metric("Data konflik",len(conflict))
+        col3.metric("N/A",len(na_data))
 
         wb = Workbook()
         ws = wb.active
@@ -262,16 +202,12 @@ if rk_file:
             ws.append(row.tolist())
 
         for _,row in conflict.iterrows():
-
             ws.append(row.tolist())
-
             for c in ws[ws.max_row]:
                 c.fill = yellow
 
         for _,row in na_data.iterrows():
-
             ws.append(row.tolist())
-
             for c in ws[ws.max_row]:
                 c.fill = red
 
@@ -285,6 +221,5 @@ if rk_file:
         )
 
     except Exception as e:
-
         st.error("Terjadi error saat memproses file")
         st.write(e)
