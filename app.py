@@ -3,7 +3,7 @@ import pandas as pd
 import re
 from io import BytesIO
 
-st.title("BRI Transaction Database Generator (Split Mode)")
+st.title("BRI Transaction Database Generator (Final Split)")
 
 # ==============================
 # UPLOAD
@@ -110,9 +110,7 @@ def clean_ids(x):
     ids = []
 
     for val in x.dropna():
-        parts = str(val).split(";")
-
-        for p in parts:
+        for p in str(val).split(";"):
             p = p.strip()
             found = re.findall(r'\d+', p)
             if found:
@@ -142,12 +140,13 @@ def grouping(db):
 if uploaded_file:
 
     df = load_statement(uploaded_file)
-    new_db_raw = prepare_new(df)
-    new_grouped = grouping(new_db_raw)
+    new_db = prepare_new(df)
+    new_grouped = grouping(new_db)
 
     if existing_file:
 
         exist_df = load_existing(existing_file)
+
         exist_df.columns = [c.upper() for c in exist_df.columns]
 
         if "DESCRIPTION" not in exist_df.columns:
@@ -158,19 +157,22 @@ if uploaded_file:
 
         existing_grouped = grouping(exist_df)
 
-        st.success("Mode: SPLIT DATABASE")
+        st.success("Mode: SPLIT VIEW")
 
+        # ==============================
+        # DISPLAY
+        # ==============================
         st.subheader("Existing Database")
         st.dataframe(existing_grouped)
 
-        st.write("")  # jarak
+        st.write("")
         st.write("")
 
         st.subheader("New Database")
         st.dataframe(new_grouped)
 
         # ==============================
-        # EXPORT (SPLIT)
+        # EXPORT
         # ==============================
         output = BytesIO()
 
