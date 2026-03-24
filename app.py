@@ -3,7 +3,7 @@ import pandas as pd
 import re
 from io import BytesIO
 
-st.title("BRI Transaction Database Generator (Final v5 - Clean System)")
+st.title("BRI Transaction Database Generator (Final v6 - Cleanest Version)")
 
 # ==============================
 # UPLOAD
@@ -12,14 +12,19 @@ uploaded_file = st.file_uploader("Upload Bank Statement", type=["xlsx","xls","cs
 existing_file = st.file_uploader("Attach Existing Database (Optional)", type=["xlsx"])
 
 # ==============================
-# NORMALIZE KODE
+# NORMALIZE KODE (SUPER STRONG)
 # ==============================
 def normalize_kode(x):
     x = str(x).strip().upper()
 
-    if x.startswith("N/A"):
+    # bersihin semua simbol
+    clean = re.sub(r'[^A-Z0-9]', '', x)
+
+    # semua variasi N/A
+    if re.match(r'^N+A*$', clean) or re.match(r'^NA\d*$', clean):
         return "N/A"
 
+    # rapihin spasi
     x = re.sub(r'\s+', ' ', x)
 
     return x
@@ -129,23 +134,25 @@ def prepare_new(df):
     return db
 
 # ==============================
-# FILTER NEW ONLY (SMART)
+# FILTER NEW ONLY (NO N/A)
 # ==============================
 def filter_new_only(existing, new):
 
     existing["KODE_UNIK"] = existing["KODE_UNIK"].apply(normalize_kode)
+    new["KODE_UNIK"] = new["KODE_UNIK"].apply(normalize_kode)
 
-    existing_valid = existing[existing["KODE_UNIK"] != "N/A"]
-    existing_codes = set(existing_valid["KODE_UNIK"])
+    existing_codes = set(
+        existing[existing["KODE_UNIK"] != "N/A"]["KODE_UNIK"]
+    )
 
-    new_valid = new[new["KODE_UNIK"] != "N/A"]
-    filtered_valid = new_valid[
-        ~new_valid["KODE_UNIK"].isin(existing_codes)
+    # BUANG SEMUA N/A
+    new = new[new["KODE_UNIK"] != "N/A"]
+
+    filtered = new[
+        ~new["KODE_UNIK"].isin(existing_codes)
     ]
 
-    new_na = new[new["KODE_UNIK"] == "N/A"]
-
-    return pd.concat([filtered_valid, new_na], ignore_index=True)
+    return filtered
 
 # ==============================
 # CLEAN ID
@@ -172,6 +179,7 @@ def clean_ids(x):
 def grouping(db):
 
     db = db.drop_duplicates(subset=["ID", "KODE_UNIK", "Description"])
+    db["KODE_UNIK"] = db["KODE_UNIK"].apply(normalize_kode)
 
     # PISAHKAN N/A
     na = db[db["KODE_UNIK"] == "N/A"].copy()
@@ -219,7 +227,7 @@ if uploaded_file:
         filtered_new = filter_new_only(exist_df, new_db)
 
         if filtered_new.empty:
-            st.warning("No new data found.")
+            st.warning("No new valid data found.")
             new_final = pd.DataFrame(columns=["ID","KODE_UNIK","Description","TYPE"])
             n_normal = n_double = n_na = pd.DataFrame()
         else:
@@ -254,7 +262,7 @@ if uploaded_file:
             new_final
         ], ignore_index=True)
 
-        st.success("Mode: UPDATE DATABASE (Clean Append)")
+        st.success("Mode: UPDATE DATABASE (Clean & Strict)")
 
     else:
 
