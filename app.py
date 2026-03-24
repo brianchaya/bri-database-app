@@ -3,7 +3,7 @@ import pandas as pd
 import re
 from io import BytesIO
 
-st.title("BRI Transaction Database Generator (Final Split)")
+st.title("BRI Transaction Database Generator (Stable Final v2)")
 
 # ==============================
 # UPLOAD
@@ -81,16 +81,30 @@ def load_existing(file):
 # ==============================
 def prepare_new(df):
 
+    if df is None or df.empty:
+        st.error("File could not be read properly.")
+        st.stop()
+
     df.columns = df.columns.astype(str).str.strip()
 
+    # ID column
     id_cols = [c for c in df.columns if c.strip().upper() == "ID"]
-    desc_candidates = [c for c in df.columns if "uraian" in c.lower() or "description" in c.lower()]
-
-    if not id_cols or not desc_candidates:
-        st.error("Column ID / Description tidak ditemukan.")
+    if len(id_cols) == 0:
+        st.error("Column 'ID' not found.")
         st.stop()
 
     id_col = id_cols[0]
+
+    # Description column
+    desc_candidates = [
+        c for c in df.columns
+        if "uraian" in c.lower() or "description" in c.lower()
+    ]
+
+    if len(desc_candidates) == 0:
+        st.error("Description column not found.")
+        st.stop()
+
     desc_col = desc_candidates[0]
 
     df["KODE_UNIK"] = df[desc_col].apply(extract_code)
@@ -98,21 +112,27 @@ def prepare_new(df):
     db = df[[id_col, "KODE_UNIK", desc_col]].copy()
     db.columns = ["ID", "KODE_UNIK", "Description"]
 
+    # IMPORTANT: jangan paksa numeric
     db["ID"] = db["ID"].astype(str)
 
     return db
 
 # ==============================
-# CLEAN ID
+# CLEAN ID (SUPER FLEXIBLE)
 # ==============================
 def clean_ids(x):
 
     ids = []
 
     for val in x.dropna():
-        for p in str(val).split(";"):
+        parts = str(val).split(";")
+
+        for p in parts:
             p = p.strip()
+
+            # ambil angka dari string
             found = re.findall(r'\d+', p)
+
             if found:
                 ids.extend(found)
 
@@ -125,14 +145,35 @@ def grouping(db):
 
     db = db.drop_duplicates(subset=["ID", "KODE_UNIK", "Description"])
 
+    db = db[~((db["KODE_UNIK"] == "N/A") & (db["Description"].isna()))]
+
     grouped = db.groupby("KODE_UNIK").agg({
         "ID": clean_ids,
         "Description": lambda x: " ; ".join(x.astype(str))
     }).reset_index()
 
-    grouped["TYPE"] = grouped["ID"].apply(lambda x: "DOUBLE" if ";" in x else "NORMAL")
+    grouped["TYPE"] = grouped["ID"].apply(
+        lambda x: "DOUBLE" if ";" in x else "NORMAL"
+    )
 
-    return grouped
+    na = db[db["KODE_UNIK"] == "N/A"].copy()
+    na["TYPE"] = "NA"
+
+    normal = grouped[grouped["TYPE"] == "NORMAL"]
+    double = grouped[grouped["TYPE"] == "DOUBLE"]
+
+    return normal, double, na
+
+# ==============================
+# MERGE
+# ==============================
+def merge_db(existing, new):
+
+    existing["ID"] = existing["ID"].astype(str)
+
+    combined = pd.concat([existing, new], ignore_index=True)
+
+    return grouping(combined)
 
 # ==============================
 # MAIN
@@ -141,7 +182,6 @@ if uploaded_file:
 
     df = load_statement(uploaded_file)
     new_db = prepare_new(df)
-    new_grouped = grouping(new_db)
 
     if existing_file:
 
@@ -152,58 +192,45 @@ if uploaded_file:
         if "DESCRIPTION" not in exist_df.columns:
             exist_df["DESCRIPTION"] = ""
 
-        exist_df = exist_df[["ID","KODE_UNIK","DESCRIPTION"]]
-        exist_df.columns = ["ID","KODE_UNIK","Description"]
+        exist_df = exist_df[["ID", "KODE_UNIK", "DESCRIPTION"]]
+        exist_df.columns = ["ID", "KODE_UNIK", "Description"]
 
-        existing_grouped = grouping(exist_df)
+        normal, double, na = merge_db(exist_df, new_db)
 
-        st.success("Mode: SPLIT VIEW")
-
-        # ==============================
-        # DISPLAY
-        # ==============================
-        st.subheader("Existing Database")
-        st.dataframe(existing_grouped)
-
-        st.write("")
-        st.write("")
-
-        st.subheader("New Database")
-        st.dataframe(new_grouped)
-
-        # ==============================
-        # EXPORT
-        # ==============================
-        output = BytesIO()
-
-        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-
-            existing_grouped.to_excel(writer, index=False, startrow=0)
-
-            new_grouped.to_excel(
-                writer,
-                index=False,
-                startrow=len(existing_grouped) + 3
-            )
-
-        st.download_button(
-            "Download Excel",
-            output.getvalue(),
-            "DATABASE_SPLIT.xlsx"
-        )
+        st.success("Mode: UPDATE DATABASE")
 
     else:
 
+        normal, double, na = grouping(new_db)
+
         st.success("Mode: CREATE NEW DATABASE")
-        st.dataframe(new_grouped)
 
-        output = BytesIO()
+    # DASHBOARD
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Normal Rows", len(normal))
+    col2.metric("Merged Rows", len(double))
+    col3.metric("Need Review (N/A)", len(na))
 
+    # FINAL TABLE
+    normal = normal.sort_values(by="ID")
+    double = double.sort_values(by="ID")
+
+    final = pd.concat([normal, double, na], ignore_index=True)
+
+    st.dataframe(final)
+
+    # EXPORT
+    output = BytesIO()
+
+    try:
         with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-            new_grouped.to_excel(writer, index=False)
+            final.to_excel(writer, index=False)
+    except:
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            final.to_excel(writer, index=False)
 
-        st.download_button(
-            "Download Excel",
-            output.getvalue(),
-            "DATABASE_NEW.xlsx"
-        )
+    st.download_button(
+        "Download Excel",
+        output.getvalue(),
+        "DATABASE_FINAL.xlsx"
+    )
