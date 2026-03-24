@@ -123,37 +123,40 @@ def prepare_new(df):
 # ==============================
 # GROUPING LOGIC
 # ==============================
-def grouping(db):
+  def grouping(db):
 
-    db = db.drop_duplicates(subset=["ID","KODE_UNIK","Description"])
+    db = db.drop_duplicates(subset=["ID", "KODE_UNIK", "Description"])
 
-    db = db[~((db["KODE_UNIK"]=="N/A") & (db["Description"].isna()))]
+    db = db[~((db["KODE_UNIK"] == "N/A") & (db["Description"].isna()))]
 
-   grouped = db.groupby("KODE_UNIK").agg({
-    "ID": lambda x: " ; ".join(
-        sorted(
-            set(
-                str(i).strip()
-                for val in x.dropna()
-                for i in str(val).split(";")
-                if i.strip().isdigit()
+    def clean_ids(x):
+        return " ; ".join(
+            sorted(
+                set(
+                    str(i).strip()
+                    for val in x.dropna()
+                    for i in str(val).split(";")
+                    if i.strip().isdigit()
+                )
             )
         )
-    ),
-    "Description": lambda x: " ; ".join(x.astype(str))
-}).reset_index()": lambda x: " ; ".join(x.astype(str))
+
+    grouped = db.groupby("KODE_UNIK").agg({
+        "ID": clean_ids,
+        "Description": lambda x: " ; ".join(x.astype(str))
     }).reset_index()
 
-    grouped["TYPE"] = grouped["ID"].apply(lambda x: "DOUBLE" if ";" in x else "NORMAL")
+    grouped["TYPE"] = grouped["ID"].apply(
+        lambda x: "DOUBLE" if ";" in x else "NORMAL"
+    )
 
-    na = db[db["KODE_UNIK"]=="N/A"].copy()
+    na = db[db["KODE_UNIK"] == "N/A"].copy()
     na["TYPE"] = "NA"
 
-    normal = grouped[grouped["TYPE"]=="NORMAL"]
-    double = grouped[grouped["TYPE"]=="DOUBLE"]
+    normal = grouped[grouped["TYPE"] == "NORMAL"]
+    double = grouped[grouped["TYPE"] == "DOUBLE"]
 
     return normal, double, na
-
 # ==============================
 # MERGE EXISTING + NEW
 # ==============================
