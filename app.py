@@ -3,7 +3,7 @@ import pandas as pd
 import re
 from io import BytesIO
 
-st.title("BRI Transaction Database Generator (Stable Final v2)")
+st.title("BRI Transaction Database Generator (Stable Final v3 - Append Mode)")
 
 # ==============================
 # UPLOAD
@@ -87,7 +87,6 @@ def prepare_new(df):
 
     df.columns = df.columns.astype(str).str.strip()
 
-    # ID column
     id_cols = [c for c in df.columns if c.strip().upper() == "ID"]
     if len(id_cols) == 0:
         st.error("Column 'ID' not found.")
@@ -95,7 +94,6 @@ def prepare_new(df):
 
     id_col = id_cols[0]
 
-    # Description column
     desc_candidates = [
         c for c in df.columns
         if "uraian" in c.lower() or "description" in c.lower()
@@ -112,13 +110,12 @@ def prepare_new(df):
     db = df[[id_col, "KODE_UNIK", desc_col]].copy()
     db.columns = ["ID", "KODE_UNIK", "Description"]
 
-    # IMPORTANT: jangan paksa numeric
     db["ID"] = db["ID"].astype(str)
 
     return db
 
 # ==============================
-# CLEAN ID (SUPER FLEXIBLE)
+# CLEAN ID
 # ==============================
 def clean_ids(x):
 
@@ -129,8 +126,6 @@ def clean_ids(x):
 
         for p in parts:
             p = p.strip()
-
-            # ambil angka dari string
             found = re.findall(r'\d+', p)
 
             if found:
@@ -144,7 +139,6 @@ def clean_ids(x):
 def grouping(db):
 
     db = db.drop_duplicates(subset=["ID", "KODE_UNIK", "Description"])
-
     db = db[~((db["KODE_UNIK"] == "N/A") & (db["Description"].isna()))]
 
     grouped = db.groupby("KODE_UNIK").agg({
@@ -165,17 +159,6 @@ def grouping(db):
     return normal, double, na
 
 # ==============================
-# MERGE
-# ==============================
-def merge_db(existing, new):
-
-    existing["ID"] = existing["ID"].astype(str)
-
-    combined = pd.concat([existing, new], ignore_index=True)
-
-    return grouping(combined)
-
-# ==============================
 # MAIN
 # ==============================
 if uploaded_file:
@@ -186,7 +169,6 @@ if uploaded_file:
     if existing_file:
 
         exist_df = load_existing(existing_file)
-
         exist_df.columns = [c.upper() for c in exist_df.columns]
 
         if "DESCRIPTION" not in exist_df.columns:
@@ -195,28 +177,62 @@ if uploaded_file:
         exist_df = exist_df[["ID", "KODE_UNIK", "DESCRIPTION"]]
         exist_df.columns = ["ID", "KODE_UNIK", "Description"]
 
-        normal, double, na = merge_db(exist_df, new_db)
+        # Tambahin TYPE kalau belum ada
+        exist_df["TYPE"] = "EXISTING"
 
-        st.success("Mode: UPDATE DATABASE")
+        # PROCESS NEW DATA
+        n_normal, n_double, n_na = grouping(new_db)
+        new_final = pd.concat([n_normal, n_double, n_na], ignore_index=True)
+
+        # DASHBOARD (hanya new data)
+        col1, col2, col3 = st.columns(3)
+        col1.metric("New Normal", len(n_normal))
+        col2.metric("New Merged", len(n_double))
+        col3.metric("New NA", len(n_na))
+
+        # SPACER
+        spacer = pd.DataFrame({
+            "ID": ["", ""],
+            "KODE_UNIK": ["", ""],
+            "Description": ["", ""],
+            "TYPE": ["", ""]
+        })
+
+        # SEPARATOR
+        separator = pd.DataFrame({
+            "ID": ["--- NEW DATA ---"],
+            "KODE_UNIK": [""],
+            "Description": [""],
+            "TYPE": [""]
+        })
+
+        # FINAL
+        final = pd.concat([
+            exist_df,
+            spacer,
+            separator,
+            new_final
+        ], ignore_index=True)
+
+        st.success("Mode: UPDATE DATABASE (Append Only)")
 
     else:
 
         normal, double, na = grouping(new_db)
 
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Normal Rows", len(normal))
+        col2.metric("Merged Rows", len(double))
+        col3.metric("Need Review (N/A)", len(na))
+
+        normal = normal.sort_values(by="ID")
+        double = double.sort_values(by="ID")
+
+        final = pd.concat([normal, double, na], ignore_index=True)
+
         st.success("Mode: CREATE NEW DATABASE")
 
-    # DASHBOARD
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Normal Rows", len(normal))
-    col2.metric("Merged Rows", len(double))
-    col3.metric("Need Review (N/A)", len(na))
-
-    # FINAL TABLE
-    normal = normal.sort_values(by="ID")
-    double = double.sort_values(by="ID")
-
-    final = pd.concat([normal, double, na], ignore_index=True)
-
+    # SHOW
     st.dataframe(final)
 
     # EXPORT
