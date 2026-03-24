@@ -130,7 +130,16 @@ def grouping(db):
     db = db[~((db["KODE_UNIK"]=="N/A") & (db["Description"].isna()))]
 
     grouped = db.groupby("KODE_UNIK").agg({
-        "ID": lambda x: " ; ".join(sorted(set(x.dropna().astype(int).astype(str)))),
+        "ID": lambda x: " ; ".join(
+    sorted(
+        set(
+            str(i).strip()
+            for val in x.dropna()
+            for i in str(val).split(";")
+            if i.strip().isdigit()
+        )
+    )
+)
         "Description": lambda x: " ; ".join(x.astype(str))
     }).reset_index()
 
