@@ -39,7 +39,7 @@ def extract_code(text):
     return "N/A"
 
 # ==============================
-# LOAD STATEMENT (MULTI SHEET + HEADER DETECT)
+# LOAD STATEMENT
 # ==============================
 def load_statement(file):
 
@@ -49,7 +49,6 @@ def load_statement(file):
     xls = pd.ExcelFile(file)
 
     for sheet in xls.sheet_names[:10]:
-
         preview = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=20)
 
         for i in range(len(preview)):
@@ -78,7 +77,7 @@ def load_existing(file):
     return pd.read_excel(xls, sheet_name=0)
 
 # ==============================
-# PREPARE NEW DATA (STRICT ID)
+# PREPARE NEW DATA
 # ==============================
 def prepare_new(df):
 
@@ -88,17 +87,14 @@ def prepare_new(df):
 
     df.columns = df.columns.astype(str).str.strip()
 
-    # STRICT ID ONLY
     id_cols = [c for c in df.columns if c.strip().upper() == "ID"]
 
     if len(id_cols) == 0:
-        st.error("Column 'ID' not found (must be exact 'ID').")
-        st.write("Detected columns:", list(df.columns))
+        st.error("Column 'ID' not found.")
         st.stop()
 
     id_col = id_cols[0]
 
-    # DESCRIPTION
     desc_candidates = [
         c for c in df.columns
         if "uraian" in c.lower() or "description" in c.lower()
@@ -106,7 +102,6 @@ def prepare_new(df):
 
     if len(desc_candidates) == 0:
         st.error("Description column not found.")
-        st.write("Detected columns:", list(df.columns))
         st.stop()
 
     desc_col = desc_candidates[0]
@@ -121,25 +116,30 @@ def prepare_new(df):
     return db
 
 # ==============================
-# GROUPING LOGIC
+# CLEAN ID (ANTI ERROR)
 # ==============================
-  def grouping(db):
+def clean_ids(x):
+
+    ids = []
+
+    for val in x.dropna():
+        parts = str(val).split(";")
+
+        for p in parts:
+            p = p.strip()
+            if p.isdigit():
+                ids.append(p)
+
+    return " ; ".join(sorted(set(ids)))
+
+# ==============================
+# GROUPING
+# ==============================
+def grouping(db):
 
     db = db.drop_duplicates(subset=["ID", "KODE_UNIK", "Description"])
 
     db = db[~((db["KODE_UNIK"] == "N/A") & (db["Description"].isna()))]
-
-    def clean_ids(x):
-        return " ; ".join(
-            sorted(
-                set(
-                    str(i).strip()
-                    for val in x.dropna()
-                    for i in str(val).split(";")
-                    if i.strip().isdigit()
-                )
-            )
-        )
 
     grouped = db.groupby("KODE_UNIK").agg({
         "ID": clean_ids,
@@ -157,10 +157,13 @@ def prepare_new(df):
     double = grouped[grouped["TYPE"] == "DOUBLE"]
 
     return normal, double, na
+
 # ==============================
-# MERGE EXISTING + NEW
+# MERGE
 # ==============================
 def merge_db(existing, new):
+
+    existing["ID"] = existing["ID"].astype(str)
 
     combined = pd.concat([existing, new], ignore_index=True)
 
@@ -183,8 +186,8 @@ if uploaded_file:
         if "DESCRIPTION" not in exist_df.columns:
             exist_df["DESCRIPTION"] = ""
 
-        exist_df = exist_df[["ID","KODE_UNIK","DESCRIPTION"]]
-        exist_df.columns = ["ID","KODE_UNIK","Description"]
+        exist_df = exist_df[["ID", "KODE_UNIK", "DESCRIPTION"]]
+        exist_df.columns = ["ID", "KODE_UNIK", "Description"]
 
         normal, double, na = merge_db(exist_df, new_db)
 
@@ -196,18 +199,13 @@ if uploaded_file:
 
         st.success("Mode: CREATE NEW DATABASE")
 
-    # ==============================
     # DASHBOARD
-    # ==============================
     col1, col2, col3 = st.columns(3)
-
     col1.metric("Normal Rows", len(normal))
     col2.metric("Merged Rows", len(double))
     col3.metric("Need Review (N/A)", len(na))
 
-    # ==============================
     # FINAL TABLE
-    # ==============================
     normal = normal.sort_values(by="ID")
     double = double.sort_values(by="ID")
 
@@ -215,17 +213,13 @@ if uploaded_file:
 
     st.dataframe(final)
 
-    # ==============================
-    # EXPORT (NO XLSXWRITER ERROR)
-    # ==============================
+    # EXPORT
     output = BytesIO()
 
     try:
         with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
             final.to_excel(writer, index=False)
-
     except:
-        # fallback (no color but safe)
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
             final.to_excel(writer, index=False)
 
