@@ -3,13 +3,26 @@ import pandas as pd
 import re
 from io import BytesIO
 
-st.title("BRI Transaction Database Generator (Final v4 - Smart Append)")
+st.title("BRI Transaction Database Generator (Final v5 - Clean System)")
 
 # ==============================
 # UPLOAD
 # ==============================
 uploaded_file = st.file_uploader("Upload Bank Statement", type=["xlsx","xls","csv"])
 existing_file = st.file_uploader("Attach Existing Database (Optional)", type=["xlsx"])
+
+# ==============================
+# NORMALIZE KODE
+# ==============================
+def normalize_kode(x):
+    x = str(x).strip().upper()
+
+    if x.startswith("N/A"):
+        return "N/A"
+
+    x = re.sub(r'\s+', ' ', x)
+
+    return x
 
 # ==============================
 # EXTRACT UNIQUE CODE
@@ -106,6 +119,7 @@ def prepare_new(df):
     desc_col = desc_candidates[0]
 
     df["KODE_UNIK"] = df[desc_col].apply(extract_code)
+    df["KODE_UNIK"] = df["KODE_UNIK"].apply(normalize_kode)
 
     db = df[[id_col, "KODE_UNIK", desc_col]].copy()
     db.columns = ["ID", "KODE_UNIK", "Description"]
@@ -115,30 +129,23 @@ def prepare_new(df):
     return db
 
 # ==============================
-# FILTER NEW ONLY
+# FILTER NEW ONLY (SMART)
 # ==============================
 def filter_new_only(existing, new):
 
-    # semua kode unik yg sudah ada
-    existing_codes = set(
-        existing["KODE_UNIK"]
-        .astype(str)
-        .str.strip()
-        .str.upper()
-    )
+    existing["KODE_UNIK"] = existing["KODE_UNIK"].apply(normalize_kode)
 
-    # normalisasi new
-    new["KODE_UNIK"] = (
-        new["KODE_UNIK"]
-        .astype(str)
-        .str.strip()
-        .str.upper()
-    )
+    existing_valid = existing[existing["KODE_UNIK"] != "N/A"]
+    existing_codes = set(existing_valid["KODE_UNIK"])
 
-    # filter: ambil yg belum ada
-    filtered = new[~new["KODE_UNIK"].isin(existing_codes)].copy()
+    new_valid = new[new["KODE_UNIK"] != "N/A"]
+    filtered_valid = new_valid[
+        ~new_valid["KODE_UNIK"].isin(existing_codes)
+    ]
 
-    return filtered
+    new_na = new[new["KODE_UNIK"] == "N/A"]
+
+    return pd.concat([filtered_valid, new_na], ignore_index=True)
 
 # ==============================
 # CLEAN ID
@@ -165,9 +172,14 @@ def clean_ids(x):
 def grouping(db):
 
     db = db.drop_duplicates(subset=["ID", "KODE_UNIK", "Description"])
-    db = db[~((db["KODE_UNIK"] == "N/A") & (db["Description"].isna()))]
 
-    grouped = db.groupby("KODE_UNIK").agg({
+    # PISAHKAN N/A
+    na = db[db["KODE_UNIK"] == "N/A"].copy()
+    na["TYPE"] = "NA"
+
+    db_valid = db[db["KODE_UNIK"] != "N/A"].copy()
+
+    grouped = db_valid.groupby("KODE_UNIK").agg({
         "ID": clean_ids,
         "Description": lambda x: " ; ".join(x.astype(str))
     }).reset_index()
@@ -175,9 +187,6 @@ def grouping(db):
     grouped["TYPE"] = grouped["ID"].apply(
         lambda x: "DOUBLE" if ";" in x else "NORMAL"
     )
-
-    na = db[db["KODE_UNIK"] == "N/A"].copy()
-    na["TYPE"] = "NA"
 
     normal = grouped[grouped["TYPE"] == "NORMAL"]
     double = grouped[grouped["TYPE"] == "DOUBLE"]
@@ -204,29 +213,26 @@ if uploaded_file:
         exist_df.columns = ["ID", "KODE_UNIK", "Description"]
 
         exist_df["TYPE"] = "EXISTING"
+        exist_df["KODE_UNIK"] = exist_df["KODE_UNIK"].apply(normalize_kode)
 
-        # ==========================
-        # FILTER NEW DATA
-        # ==========================
+        # FILTER
         filtered_new = filter_new_only(exist_df, new_db)
 
         if filtered_new.empty:
-            st.warning("No new data found (all already exist).")
+            st.warning("No new data found.")
             new_final = pd.DataFrame(columns=["ID","KODE_UNIK","Description","TYPE"])
-
             n_normal = n_double = n_na = pd.DataFrame()
-
         else:
             n_normal, n_double, n_na = grouping(filtered_new)
             new_final = pd.concat([n_normal, n_double, n_na], ignore_index=True)
 
-        # DASHBOARD (NEW ONLY)
+        # DASHBOARD
         col1, col2, col3 = st.columns(3)
         col1.metric("New Normal", len(n_normal))
         col2.metric("New Merged", len(n_double))
         col3.metric("New NA", len(n_na))
 
-        # SPACER
+        # FORMAT OUTPUT
         spacer = pd.DataFrame({
             "ID": ["", ""],
             "KODE_UNIK": ["", ""],
@@ -234,7 +240,6 @@ if uploaded_file:
             "TYPE": ["", ""]
         })
 
-        # SEPARATOR
         separator = pd.DataFrame({
             "ID": ["--- NEW DATA ---"],
             "KODE_UNIK": [""],
@@ -249,7 +254,7 @@ if uploaded_file:
             new_final
         ], ignore_index=True)
 
-        st.success("Mode: UPDATE DATABASE (Only New Data Added)")
+        st.success("Mode: UPDATE DATABASE (Clean Append)")
 
     else:
 
@@ -267,14 +272,10 @@ if uploaded_file:
 
         st.success("Mode: CREATE NEW DATABASE")
 
-    # ==========================
     # SHOW
-    # ==========================
     st.dataframe(final)
 
-    # ==========================
     # EXPORT
-    # ==========================
     output = BytesIO()
 
     try:
