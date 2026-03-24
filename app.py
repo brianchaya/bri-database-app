@@ -3,7 +3,7 @@ import pandas as pd
 import re
 from io import BytesIO
 
-st.title("BRI Transaction Database Generator (Stable Final v3 - Append Mode)")
+st.title("BRI Transaction Database Generator (Final v4 - Smart Append)")
 
 # ==============================
 # UPLOAD
@@ -115,6 +115,25 @@ def prepare_new(df):
     return db
 
 # ==============================
+# FILTER NEW ONLY
+# ==============================
+def filter_new_only(existing, new):
+
+    existing_keys = set(
+        existing["ID"].astype(str).str.strip() + "|" +
+        existing["KODE_UNIK"].astype(str).str.strip()
+    )
+
+    new["KEY"] = (
+        new["ID"].astype(str).str.strip() + "|" +
+        new["KODE_UNIK"].astype(str).str.strip()
+    )
+
+    filtered = new[~new["KEY"].isin(existing_keys)].copy()
+
+    return filtered.drop(columns=["KEY"])
+
+# ==============================
 # CLEAN ID
 # ==============================
 def clean_ids(x):
@@ -177,14 +196,24 @@ if uploaded_file:
         exist_df = exist_df[["ID", "KODE_UNIK", "DESCRIPTION"]]
         exist_df.columns = ["ID", "KODE_UNIK", "Description"]
 
-        # Tambahin TYPE kalau belum ada
         exist_df["TYPE"] = "EXISTING"
 
-        # PROCESS NEW DATA
-        n_normal, n_double, n_na = grouping(new_db)
-        new_final = pd.concat([n_normal, n_double, n_na], ignore_index=True)
+        # ==========================
+        # FILTER NEW DATA
+        # ==========================
+        filtered_new = filter_new_only(exist_df, new_db)
 
-        # DASHBOARD (hanya new data)
+        if filtered_new.empty:
+            st.warning("No new data found (all already exist).")
+            new_final = pd.DataFrame(columns=["ID","KODE_UNIK","Description","TYPE"])
+
+            n_normal = n_double = n_na = pd.DataFrame()
+
+        else:
+            n_normal, n_double, n_na = grouping(filtered_new)
+            new_final = pd.concat([n_normal, n_double, n_na], ignore_index=True)
+
+        # DASHBOARD (NEW ONLY)
         col1, col2, col3 = st.columns(3)
         col1.metric("New Normal", len(n_normal))
         col2.metric("New Merged", len(n_double))
@@ -206,7 +235,6 @@ if uploaded_file:
             "TYPE": [""]
         })
 
-        # FINAL
         final = pd.concat([
             exist_df,
             spacer,
@@ -214,7 +242,7 @@ if uploaded_file:
             new_final
         ], ignore_index=True)
 
-        st.success("Mode: UPDATE DATABASE (Append Only)")
+        st.success("Mode: UPDATE DATABASE (Only New Data Added)")
 
     else:
 
@@ -232,10 +260,14 @@ if uploaded_file:
 
         st.success("Mode: CREATE NEW DATABASE")
 
+    # ==========================
     # SHOW
+    # ==========================
     st.dataframe(final)
 
+    # ==========================
     # EXPORT
+    # ==========================
     output = BytesIO()
 
     try:
