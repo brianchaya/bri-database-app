@@ -3,7 +3,7 @@ import pandas as pd
 import re
 from io import BytesIO
 
-st.title("BRI Transaction Database Generator (Stable Final)")
+st.title("BRI Transaction Database Generator (Stable Final v2)")
 
 # ==============================
 # UPLOAD
@@ -87,14 +87,15 @@ def prepare_new(df):
 
     df.columns = df.columns.astype(str).str.strip()
 
+    # ID column
     id_cols = [c for c in df.columns if c.strip().upper() == "ID"]
-
     if len(id_cols) == 0:
         st.error("Column 'ID' not found.")
         st.stop()
 
     id_col = id_cols[0]
 
+    # Description column
     desc_candidates = [
         c for c in df.columns
         if "uraian" in c.lower() or "description" in c.lower()
@@ -111,12 +112,13 @@ def prepare_new(df):
     db = df[[id_col, "KODE_UNIK", desc_col]].copy()
     db.columns = ["ID", "KODE_UNIK", "Description"]
 
-    db["ID"] = pd.to_numeric(db["ID"], errors="coerce")
+    # IMPORTANT: jangan paksa numeric
+    db["ID"] = db["ID"].astype(str)
 
     return db
 
 # ==============================
-# CLEAN ID (ANTI ERROR)
+# CLEAN ID (SUPER FLEXIBLE)
 # ==============================
 def clean_ids(x):
 
@@ -127,8 +129,12 @@ def clean_ids(x):
 
         for p in parts:
             p = p.strip()
-            if p.isdigit():
-                ids.append(p)
+
+            # ambil angka dari string
+            found = re.findall(r'\d+', p)
+
+            if found:
+                ids.extend(found)
 
     return " ; ".join(sorted(set(ids)))
 
