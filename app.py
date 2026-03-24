@@ -119,19 +119,26 @@ def prepare_new(df):
 # ==============================
 def filter_new_only(existing, new):
 
-    existing_keys = set(
-        existing["ID"].astype(str).str.strip() + "|" +
-        existing["KODE_UNIK"].astype(str).str.strip()
+    # semua kode unik yg sudah ada
+    existing_codes = set(
+        existing["KODE_UNIK"]
+        .astype(str)
+        .str.strip()
+        .str.upper()
     )
 
-    new["KEY"] = (
-        new["ID"].astype(str).str.strip() + "|" +
-        new["KODE_UNIK"].astype(str).str.strip()
+    # normalisasi new
+    new["KODE_UNIK"] = (
+        new["KODE_UNIK"]
+        .astype(str)
+        .str.strip()
+        .str.upper()
     )
 
-    filtered = new[~new["KEY"].isin(existing_keys)].copy()
+    # filter: ambil yg belum ada
+    filtered = new[~new["KODE_UNIK"].isin(existing_codes)].copy()
 
-    return filtered.drop(columns=["KEY"])
+    return filtered
 
 # ==============================
 # CLEAN ID
