@@ -3,7 +3,7 @@ import pandas as pd
 import re
 from io import BytesIO
 
-st.title("BRI Transaction Database Generator (Final v7 - Rolling Update)")
+st.title("BRI Transaction Database Generator (Final v6 - Cleanest Version)")
 
 # ==============================
 # UPLOAD
@@ -17,11 +17,14 @@ existing_file = st.file_uploader("Attach Existing Database (Optional)", type=["x
 def normalize_kode(x):
     x = str(x).strip().upper()
 
+    # bersihin semua simbol
     clean = re.sub(r'[^A-Z0-9]', '', x)
 
+    # semua variasi N/A
     if re.match(r'^N+A*$', clean) or re.match(r'^NA\d*$', clean):
         return "N/A"
 
+    # rapihin spasi
     x = re.sub(r'\s+', ' ', x)
 
     return x
@@ -92,53 +95,6 @@ def load_existing(file):
     return pd.read_excel(xls, sheet_name=0)
 
 # ==============================
-# 🔥 SPLIT EXISTING & OLD NEW
-# ==============================
-def split_existing_and_new(df):
-
-    df = df.copy()
-
-    marker_idx = df[
-        df["ID"].astype(str).str.contains("--- NEW DATA ---", na=False)
-    ].index
-
-    if len(marker_idx) == 0:
-        return df, pd.DataFrame(columns=df.columns)
-
-    split_idx = marker_idx[0]
-
-    existing = df.iloc[:split_idx].copy()
-    new_old = df.iloc[split_idx+1:].copy()
-
-    existing = existing[existing["ID"] != ""]
-    new_old = new_old[new_old["ID"] != ""]
-
-    return existing, new_old
-
-# ==============================
-# 🔥 MERGE EXISTING + OLD NEW
-# ==============================
-def merge_existing_with_old_new(existing, old_new):
-
-    if old_new is None or old_new.empty:
-        return existing
-
-    combined = pd.concat([existing, old_new], ignore_index=True)
-
-    normal, double, na = grouping(combined)
-
-    merged = pd.concat([normal, double, na], ignore_index=True)
-
-    def get_min_id(x):
-        nums = re.findall(r'\d+', str(x))
-        return int(nums[0]) if nums else 999999999
-
-    merged["SORT_KEY"] = merged["ID"].apply(get_min_id)
-    merged = merged.sort_values("SORT_KEY").drop(columns="SORT_KEY")
-
-    return merged
-
-# ==============================
 # PREPARE NEW DATA
 # ==============================
 def prepare_new(df):
@@ -189,6 +145,7 @@ def filter_new_only(existing, new):
         existing[existing["KODE_UNIK"] != "N/A"]["KODE_UNIK"]
     )
 
+    # BUANG SEMUA N/A
     new = new[new["KODE_UNIK"] != "N/A"]
 
     filtered = new[
@@ -224,6 +181,7 @@ def grouping(db):
     db = db.drop_duplicates(subset=["ID", "KODE_UNIK", "Description"])
     db["KODE_UNIK"] = db["KODE_UNIK"].apply(normalize_kode)
 
+    # PISAHKAN N/A
     na = db[db["KODE_UNIK"] == "N/A"].copy()
     na["TYPE"] = "NA"
 
@@ -253,20 +211,14 @@ if uploaded_file:
 
     if existing_file:
 
-        exist_df_raw = load_existing(existing_file)
-        exist_df_raw.columns = [c.upper() for c in exist_df_raw.columns]
+        exist_df = load_existing(existing_file)
+        exist_df.columns = [c.upper() for c in exist_df.columns]
 
-        if "DESCRIPTION" not in exist_df_raw.columns:
-            exist_df_raw["DESCRIPTION"] = ""
+        if "DESCRIPTION" not in exist_df.columns:
+            exist_df["DESCRIPTION"] = ""
 
-        exist_df_raw = exist_df_raw[["ID", "KODE_UNIK", "DESCRIPTION"]]
-        exist_df_raw.columns = ["ID", "KODE_UNIK", "Description"]
-
-        # 🔥 SPLIT
-        exist_df, old_new = split_existing_and_new(exist_df_raw)
-
-        # 🔥 MERGE
-        exist_df = merge_existing_with_old_new(exist_df, old_new)
+        exist_df = exist_df[["ID", "KODE_UNIK", "DESCRIPTION"]]
+        exist_df.columns = ["ID", "KODE_UNIK", "Description"]
 
         exist_df["TYPE"] = "EXISTING"
         exist_df["KODE_UNIK"] = exist_df["KODE_UNIK"].apply(normalize_kode)
@@ -282,11 +234,13 @@ if uploaded_file:
             n_normal, n_double, n_na = grouping(filtered_new)
             new_final = pd.concat([n_normal, n_double, n_na], ignore_index=True)
 
+        # DASHBOARD
         col1, col2, col3 = st.columns(3)
         col1.metric("New Normal", len(n_normal))
         col2.metric("New Merged", len(n_double))
         col3.metric("New NA", len(n_na))
 
+        # FORMAT OUTPUT
         spacer = pd.DataFrame({
             "ID": ["", ""],
             "KODE_UNIK": ["", ""],
@@ -308,7 +262,7 @@ if uploaded_file:
             new_final
         ], ignore_index=True)
 
-        st.success("Mode: UPDATE DATABASE (Rolling Clean)")
+        st.success("Mode: UPDATE DATABASE (Clean & Strict)")
 
     else:
 
@@ -326,8 +280,10 @@ if uploaded_file:
 
         st.success("Mode: CREATE NEW DATABASE")
 
+    # SHOW
     st.dataframe(final)
 
+    # EXPORT
     output = BytesIO()
 
     try:
