@@ -335,8 +335,9 @@ if uploaded_file:
         col2.metric("Merged Rows", len(double))
         col3.metric("Need Review (N/A)", len(na))
 
-        normal = normal.sort_values(by="ID")
-        double = double.sort_values(by="ID")
+        normal = sort_by_id(normal)
+        double = sort_by_id(double)
+        na = sort_by_id(na)
 
         final = pd.concat([normal, double, na], ignore_index=True)
 
