@@ -191,7 +191,17 @@ def filter_new_only(existing, new):
         existing[existing["KODE_UNIK"] != "N/A"]["KODE_UNIK"]
     )
 
-    new = new[new["KODE_UNIK"] != "N/A"]
+    # 🔥 JANGAN BUANG N/A
+    # new = new[new["KODE_UNIK"] != "N/A"]
+    
+    existing_codes = set(
+        existing[existing["KODE_UNIK"] != "N/A"]["KODE_UNIK"]
+    )
+    
+    filtered = new[
+        (new["KODE_UNIK"] == "N/A") | 
+        (~new["KODE_UNIK"].isin(existing_codes))
+    ]
 
     filtered = new[
         ~new["KODE_UNIK"].isin(existing_codes)
