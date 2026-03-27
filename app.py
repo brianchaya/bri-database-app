@@ -232,14 +232,15 @@ def clean_ids(x):
 # GROUPING
 # ==============================
 def grouping(db):
-
-    db = db.drop_duplicates(subset=["ID", "KODE_UNIK", "Description"])
+    db_valid = db[db["KODE_UNIK"] != "N/A"].drop_duplicates(
+        subset=["ID", "KODE_UNIK", "Description"]
+    )
+    
+    db_na = db[db["KODE_UNIK"] == "N/A"].copy()
     db["KODE_UNIK"] = db["KODE_UNIK"].apply(normalize_kode)
 
-    na = db[db["KODE_UNIK"] == "N/A"].copy()
+    na = db_na.copy()
     na["TYPE"] = "NA"
-
-    db_valid = db[db["KODE_UNIK"] != "N/A"].copy()
 
     grouped = db_valid.groupby("KODE_UNIK").agg({
         "ID": clean_ids,
