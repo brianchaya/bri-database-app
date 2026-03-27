@@ -3,7 +3,7 @@ import pandas as pd
 import re
 from io import BytesIO
 
-st.title("BRI Transaction Database Generator (Final v7 - Rolling Update)")
+st.title("BRI Transaction Database Generator")
 
 # ==============================
 # UPLOAD
@@ -308,7 +308,7 @@ if uploaded_file:
             new_final
         ], ignore_index=True)
 
-        st.success("Mode: UPDATE DATABASE (Rolling Clean)")
+        st.success("Mode: UPDATE DATABASE")
 
     else:
 
@@ -340,5 +340,5 @@ if uploaded_file:
     st.download_button(
         "Download Excel",
         output.getvalue(),
-        "DATABASE_FINAL.xlsx"
+        "DATABASE_BRI.xlsx"
     )
