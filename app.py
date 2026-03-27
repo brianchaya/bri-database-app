@@ -173,7 +173,9 @@ def prepare_new(df):
     db = df[[id_col, "KODE_UNIK", desc_col]].copy()
     db.columns = ["ID", "KODE_UNIK", "Description"]
 
-    db["ID"] = db["ID"].astype(str)
+    db["ID"] = db["ID"].astype(str).replace(
+        ["nan", "None", "NaT", ""], "N/A"
+    )
 
     return db
 
@@ -286,6 +288,20 @@ if uploaded_file:
 
         exist_df_raw = exist_df_raw[["ID", "KODE_UNIK", "DESCRIPTION"]]
         exist_df_raw.columns = ["ID", "KODE_UNIK", "Description"]
+
+        exist_df_raw = exist_df_raw.fillna("N/A")
+
+        exist_df_raw["ID"] = exist_df_raw["ID"].astype(str).replace(
+            ["nan", "None", "NaT", ""], "N/A"
+        )
+        
+        exist_df_raw["KODE_UNIK"] = exist_df_raw["KODE_UNIK"].astype(str).replace(
+            ["nan", "None", "NaT", ""], "N/A"
+        )
+        
+        exist_df_raw["Description"] = exist_df_raw["Description"].astype(str).replace(
+            ["nan", "None", "NaT", ""], ""
+        )
 
         # 🔥 SPLIT
         exist_df, old_new = split_existing_and_new(exist_df_raw)
