@@ -214,7 +214,7 @@ def clean_ids(x):
             if found:
                 ids.extend(found)
 
-    return " ; ".join(sorted(set(ids)))
+    return " ; ".join(sorted(set(ids))) if ids else "N/A"
 
 # ==============================
 # GROUPING
