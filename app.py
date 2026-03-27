@@ -187,25 +187,27 @@ def filter_new_only(existing, new):
     existing["KODE_UNIK"] = existing["KODE_UNIK"].apply(normalize_kode)
     new["KODE_UNIK"] = new["KODE_UNIK"].apply(normalize_kode)
 
+    # ambil kode unik existing (selain N/A)
     existing_codes = set(
         existing[existing["KODE_UNIK"] != "N/A"]["KODE_UNIK"]
     )
 
-    # 🔥 JANGAN BUANG N/A
-    # new = new[new["KODE_UNIK"] != "N/A"]
-    
-    existing_codes = set(
-        existing[existing["KODE_UNIK"] != "N/A"]["KODE_UNIK"]
-    )
-    
-    filtered = new[
-        (new["KODE_UNIK"] == "N/A") | 
-        (~new["KODE_UNIK"].isin(existing_codes))
+    new_valid = new[new["KODE_UNIK"] != "N/A"]
+    new_na = new[new["KODE_UNIK"] == "N/A"]
+
+    new_valid = new_valid[
+        ~new_valid["KODE_UNIK"].isin(existing_codes)
     ]
 
-    filtered = new[
-        ~new["KODE_UNIK"].isin(existing_codes)
+    existing_na_desc = set(
+        existing[existing["KODE_UNIK"] == "N/A"]["Description"]
+    )
+
+    new_na = new_na[
+        ~new_na["Description"].isin(existing_na_desc)
     ]
+
+    filtered = pd.concat([new_valid, new_na], ignore_index=True)
 
     return filtered
 
@@ -232,15 +234,14 @@ def clean_ids(x):
 # GROUPING
 # ==============================
 def grouping(db):
-    db_valid = db[db["KODE_UNIK"] != "N/A"].drop_duplicates(
-        subset=["ID", "KODE_UNIK", "Description"]
-    )
-    
-    db_na = db[db["KODE_UNIK"] == "N/A"].copy()
+
+    db = db.copy()
     db["KODE_UNIK"] = db["KODE_UNIK"].apply(normalize_kode)
 
-    na = db_na.copy()
-    na["TYPE"] = "NA"
+    db_na = db[db["KODE_UNIK"] == "N/A"].copy()
+    db_valid = db[db["KODE_UNIK"] != "N/A"].copy()
+
+    db_valid = db_valid.drop_duplicates(subset=["ID", "KODE_UNIK", "Description"])
 
     grouped = db_valid.groupby("KODE_UNIK").agg({
         "ID": clean_ids,
@@ -258,13 +259,12 @@ def grouping(db):
 
     normal = grouped[grouped["TYPE"] == "NORMAL"]
     double = grouped[grouped["TYPE"] == "DOUBLE"]
-    
-    na_extra = grouped[grouped["TYPE"] == "NA"].copy()
-    na_extra["TYPE"] = "NA"
-    
-    na = pd.concat([na, na_extra], ignore_index=True)
 
-    return normal, double, na
+    db_na = db_na.drop_duplicates(subset=["Description"])
+
+    db_na["TYPE"] = "NA"
+
+    return normal, double, db_na
     
 def sort_by_id(df):
 
