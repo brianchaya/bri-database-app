@@ -242,7 +242,22 @@ def grouping(db):
     double = grouped[grouped["TYPE"] == "DOUBLE"]
 
     return normal, double, na
+    
+def sort_by_id(df):
 
+    def get_min_id(x):
+        nums = re.findall(r'\d+', str(x))
+        return min([int(n) for n in nums]) if nums else 999999999
+
+    df = df.copy()
+
+    df["IS_NA"] = df["KODE_UNIK"].apply(lambda x: 1 if x == "N/A" else 0)
+    df["SORT_KEY"] = df["ID"].apply(get_min_id)
+
+    df = df.sort_values(["IS_NA", "SORT_KEY"]).drop(columns=["SORT_KEY", "IS_NA"])
+
+    return df
+    
 # ==============================
 # MAIN
 # ==============================
@@ -267,6 +282,7 @@ if uploaded_file:
 
         # 🔥 MERGE
         exist_df = pd.concat([exist_df, old_new], ignore_index=True)
+        exist_df = sort_by_id(exist_df)
 
         exist_df["TYPE"] = "EXISTING"
         exist_df["KODE_UNIK"] = exist_df["KODE_UNIK"].apply(normalize_kode)
