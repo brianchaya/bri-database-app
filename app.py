@@ -92,7 +92,7 @@ def load_existing(file):
     return pd.read_excel(xls, sheet_name=0)
 
 # ==============================
-# 🔥 SPLIT EXISTING & OLD NEW
+# SPLIT EXISTING & OLD NEW
 # ==============================
 def split_existing_and_new(df):
 
@@ -116,7 +116,7 @@ def split_existing_and_new(df):
     return existing, new_old
 
 # ==============================
-# 🔥 MERGE EXISTING + OLD NEW
+# MERGE EXISTING + OLD NEW
 # ==============================
 def merge_existing_with_old_new(existing, old_new):
 
@@ -234,12 +234,22 @@ def grouping(db):
         "Description": lambda x: " ; ".join(x.astype(str))
     }).reset_index()
 
+    def is_valid_id(x):
+        nums = re.findall(r'\d+', str(x))
+        return len(nums) > 0
+
     grouped["TYPE"] = grouped["ID"].apply(
-        lambda x: "DOUBLE" if ";" in x else "NORMAL"
+        lambda x: "NA" if not is_valid_id(x)
+        else ("DOUBLE" if ";" in x else "NORMAL")
     )
 
     normal = grouped[grouped["TYPE"] == "NORMAL"]
     double = grouped[grouped["TYPE"] == "DOUBLE"]
+    
+    na_extra = grouped[grouped["TYPE"] == "NA"].copy()
+    na_extra["TYPE"] = "NA"
+    
+    na = pd.concat([na, na_extra], ignore_index=True)
 
     return normal, double, na
     
