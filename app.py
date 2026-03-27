@@ -266,7 +266,7 @@ if uploaded_file:
         exist_df, old_new = split_existing_and_new(exist_df_raw)
 
         # 🔥 MERGE
-        exist_df = merge_existing_with_old_new(exist_df, old_new)
+        exist_df = pd.concat([exist_df, old_new], ignore_index=True)
 
         exist_df["TYPE"] = "EXISTING"
         exist_df["KODE_UNIK"] = exist_df["KODE_UNIK"].apply(normalize_kode)
