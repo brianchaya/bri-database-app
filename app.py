@@ -238,83 +238,31 @@ def grouping(db):
     db = db.copy()
     db["KODE_UNIK"] = db["KODE_UNIK"].apply(normalize_kode)
 
-    # =========================
-    # SPLIT NA
-    # =========================
     db_na = db[db["KODE_UNIK"] == "N/A"].copy()
     db_valid = db[db["KODE_UNIK"] != "N/A"].copy()
 
     db_valid = db_valid.drop_duplicates(subset=["ID", "KODE_UNIK", "Description"])
 
-    # =========================
-    # DETECT ID DOUBLE (NEW LOGIC)
-    # =========================
-    id_group = db_valid.groupby("ID")["KODE_UNIK"].nunique().reset_index()
-    multi_kode_ids = set(id_group[id_group["KODE_UNIK"] > 1]["ID"])
-
-    # =========================
-    # FLAG ROW
-    # =========================
-    db_valid["FORCE_DOUBLE"] = db_valid["ID"].apply(lambda x: x in multi_kode_ids)
-
-    # =========================
-    # GROUP NORMAL (BY KODE_UNIK)
-    # =========================
-    normal_base = db_valid[~db_valid["FORCE_DOUBLE"]]
-
-    grouped_normal = normal_base.groupby("KODE_UNIK").agg({
+    grouped = db_valid.groupby("KODE_UNIK").agg({
         "ID": clean_ids,
         "Description": lambda x: " ; ".join(x.astype(str))
     }).reset_index()
 
-    # =========================
-    # GROUP DOUBLE (2 TIPE)
-    # =========================
-    
-    # A. KODE_UNIK punya banyak ID
-    kode_group = db_valid.groupby("KODE_UNIK")["ID"].nunique().reset_index()
-    multi_id_kode = set(kode_group[kode_group["ID"] > 1]["KODE_UNIK"])
+    def is_valid_id(x):
+        nums = re.findall(r'\d+', str(x))
+        return len(nums) > 0
 
-    double_kode = db_valid[db_valid["KODE_UNIK"].isin(multi_id_kode)]
+    grouped["TYPE"] = grouped["ID"].apply(
+        lambda x: "NA" if not is_valid_id(x)
+        else ("DOUBLE" if ";" in x else "NORMAL")
+    )
 
-    grouped_double_kode = double_kode.groupby("KODE_UNIK").agg({
-        "ID": clean_ids,
-        "Description": lambda x: " ; ".join(x.astype(str))
-    }).reset_index()
+    normal = grouped[grouped["TYPE"] == "NORMAL"]
+    double = grouped[grouped["TYPE"] == "DOUBLE"]
 
-    # B. ID punya banyak KODE_UNIK (NEW 🔥)
-    double_id = db_valid[db_valid["FORCE_DOUBLE"]]
-
-    grouped_double_id = double_id.groupby("ID").agg({
-        "KODE_UNIK": lambda x: " ; ".join(sorted(set(x))),
-        "Description": lambda x: " ; ".join(x.astype(str))
-    }).reset_index()
-
-    grouped_double_id.rename(columns={"ID": "ID"}, inplace=True)
-
-    # =========================
-    # FORMAT TYPE
-    # =========================
-    grouped_normal["TYPE"] = "NORMAL"
-    grouped_double_kode["TYPE"] = "DOUBLE"
-    grouped_double_id["TYPE"] = "DOUBLE"
-
-    # supaya kolom sama
-    grouped_double_id = grouped_double_id.rename(columns={
-        "KODE_UNIK": "KODE_UNIK"
-    })
-
-    # =========================
-    # NA CLEAN
-    # =========================
     db_na = db_na.drop_duplicates(subset=["Description"])
-    db_na["TYPE"] = "NA"
 
-    # =========================
-    # FINAL COMBINE
-    # =========================
-    normal = grouped_normal
-    double = pd.concat([grouped_double_kode, grouped_double_id], ignore_index=True)
+    db_na["TYPE"] = "NA"
 
     return normal, double, db_na
     
