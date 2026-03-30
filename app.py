@@ -187,7 +187,6 @@ def filter_new_only(existing, new):
     existing["KODE_UNIK"] = existing["KODE_UNIK"].apply(normalize_kode)
     new["KODE_UNIK"] = new["KODE_UNIK"].apply(normalize_kode)
 
-    # ambil kode unik existing (selain N/A)
     existing_codes = set(
         existing[existing["KODE_UNIK"] != "N/A"]["KODE_UNIK"]
     )
@@ -212,7 +211,7 @@ def filter_new_only(existing, new):
     return filtered
 
 # ==============================
-# CLEAN ID
+# CLEAN ID (FIX 🔥)
 # ==============================
 def clean_ids(x):
 
@@ -223,12 +222,17 @@ def clean_ids(x):
 
         for p in parts:
             p = p.strip()
-            found = re.findall(r'\d+', p)
-
-            if found:
-                ids.extend(found)
+            if p:
+                ids.append(p)
 
     return " ; ".join(sorted(set(ids))) if ids else "N/A"
+
+# ==============================
+# VALIDATE NUMERIC ID (NEW 🔥)
+# ==============================
+def is_pure_numeric_id(x):
+    x = str(x).strip()
+    return bool(re.fullmatch(r'\d+', x))
 
 # ==============================
 # GROUPING
@@ -239,32 +243,26 @@ def grouping(db):
     db["KODE_UNIK"] = db["KODE_UNIK"].apply(normalize_kode)
     db["ID"] = db["ID"].astype(str)
 
-    # =========================
-    # FORCE NA (PRIORITY 🔥)
-    # =========================
+    # 🔥 FIX DI SINI
     db_na = db[
         (db["KODE_UNIK"] == "N/A") |
-        (db["ID"].str.upper() == "N/A")
+        (db["ID"].str.upper() == "N/A") |
+        (~db["ID"].apply(is_pure_numeric_id))
     ].copy()
 
     db_valid = db[
         (db["KODE_UNIK"] != "N/A") &
-        (db["ID"].str.upper() != "N/A")
+        (db["ID"].str.upper() != "N/A") &
+        (db["ID"].apply(is_pure_numeric_id))
     ].copy()
 
     db_valid = db_valid.drop_duplicates(subset=["ID", "KODE_UNIK", "Description"])
 
-    # =========================
-    # DETECT ID → MULTI KODE (DOUBLE TYPE 2)
-    # =========================
     id_group = db_valid.groupby("ID")["KODE_UNIK"].nunique().reset_index()
     multi_kode_ids = set(id_group[id_group["KODE_UNIK"] > 1]["ID"])
 
     db_valid["FORCE_DOUBLE"] = db_valid["ID"].apply(lambda x: x in multi_kode_ids)
 
-    # =========================
-    # NORMAL BASE (exclude forced double)
-    # =========================
     normal_base = db_valid[~db_valid["FORCE_DOUBLE"]]
 
     grouped_normal = normal_base.groupby("KODE_UNIK").agg({
@@ -274,9 +272,6 @@ def grouping(db):
 
     grouped_normal["TYPE"] = "NORMAL"
 
-    # =========================
-    # DOUBLE TYPE 1: KODE_UNIK → MULTI ID
-    # =========================
     kode_group = db_valid.groupby("KODE_UNIK")["ID"].nunique().reset_index()
     multi_id_kode = set(kode_group[kode_group["ID"] > 1]["KODE_UNIK"])
 
@@ -289,9 +284,6 @@ def grouping(db):
 
     grouped_double_kode["TYPE"] = "DOUBLE"
 
-    # =========================
-    # DOUBLE TYPE 2: ID → MULTI KODE (NEW 🔥)
-    # =========================
     double_id = db_valid[db_valid["FORCE_DOUBLE"]]
 
     grouped_double_id = double_id.groupby("ID").agg({
@@ -301,20 +293,17 @@ def grouping(db):
 
     grouped_double_id["TYPE"] = "DOUBLE"
 
-    # =========================
-    # NA CLEAN
-    # =========================
     db_na = db_na.drop_duplicates(subset=["Description"])
     db_na["TYPE"] = "NA"
 
-    # =========================
-    # FINAL COMBINE
-    # =========================
     normal = grouped_normal
     double = pd.concat([grouped_double_kode, grouped_double_id], ignore_index=True)
 
     return normal, double, db_na
-    
+
+# ==============================
+# SORT
+# ==============================
 def sort_by_id(df):
 
     def get_min_id(x):
@@ -329,119 +318,3 @@ def sort_by_id(df):
     df = df.sort_values(["IS_NA", "SORT_KEY"]).drop(columns=["SORT_KEY", "IS_NA"])
 
     return df
-    
-# ==============================
-# MAIN
-# ==============================
-if uploaded_file:
-
-    df = load_statement(uploaded_file)
-    new_db = prepare_new(df)
-
-    if existing_file:
-
-        exist_df_raw = load_existing(existing_file)
-        exist_df_raw.columns = [c.upper() for c in exist_df_raw.columns]
-
-        if "DESCRIPTION" not in exist_df_raw.columns:
-            exist_df_raw["DESCRIPTION"] = ""
-
-        exist_df_raw = exist_df_raw[["ID", "KODE_UNIK", "DESCRIPTION"]]
-        exist_df_raw.columns = ["ID", "KODE_UNIK", "Description"]
-
-        exist_df_raw = exist_df_raw.fillna("N/A")
-
-        exist_df_raw["ID"] = exist_df_raw["ID"].astype(str).replace(
-            ["nan", "None", "NaT", ""], "N/A"
-        )
-        
-        exist_df_raw["KODE_UNIK"] = exist_df_raw["KODE_UNIK"].astype(str).replace(
-            ["nan", "None", "NaT", ""], "N/A"
-        )
-        
-        exist_df_raw["Description"] = exist_df_raw["Description"].astype(str).replace(
-            ["nan", "None", "NaT", ""], ""
-        )
-
-        # 🔥 SPLIT
-        exist_df, old_new = split_existing_and_new(exist_df_raw)
-
-        # 🔥 MERGE
-        exist_df = pd.concat([exist_df, old_new], ignore_index=True)
-        exist_df = sort_by_id(exist_df)
-
-        exist_df["TYPE"] = "EXISTING"
-        exist_df["KODE_UNIK"] = exist_df["KODE_UNIK"].apply(normalize_kode)
-
-        # FILTER
-        filtered_new = filter_new_only(exist_df, new_db)
-
-        if filtered_new.empty:
-            st.warning("No new valid data found.")
-            new_final = pd.DataFrame(columns=["ID","KODE_UNIK","Description","TYPE"])
-            n_normal = n_double = n_na = pd.DataFrame()
-        else:
-            n_normal, n_double, n_na = grouping(filtered_new)
-            new_final = pd.concat([n_normal, n_double, n_na], ignore_index=True)
-
-        col1, col2, col3 = st.columns(3)
-        col1.metric("New Normal", len(n_normal))
-        col2.metric("New Merged", len(n_double))
-        col3.metric("New NA", len(n_na))
-
-        spacer = pd.DataFrame({
-            "ID": ["", ""],
-            "KODE_UNIK": ["", ""],
-            "Description": ["", ""],
-            "TYPE": ["", ""]
-        })
-
-        separator = pd.DataFrame({
-            "ID": ["--- NEW DATA ---"],
-            "KODE_UNIK": [""],
-            "Description": [""],
-            "TYPE": [""]
-        })
-
-        final = pd.concat([
-            exist_df,
-            spacer,
-            separator,
-            new_final
-        ], ignore_index=True)
-
-        st.success("Mode: UPDATE DATABASE")
-
-    else:
-
-        normal, double, na = grouping(new_db)
-
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Normal Rows", len(normal))
-        col2.metric("Merged Rows", len(double))
-        col3.metric("Need Review (N/A)", len(na))
-
-        normal = sort_by_id(normal)
-        double = sort_by_id(double)
-        na = sort_by_id(na)
-
-        final = pd.concat([normal, double, na], ignore_index=True)
-
-        st.success("Mode: CREATE NEW DATABASE")
-
-    st.dataframe(final)
-
-    output = BytesIO()
-
-    try:
-        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-            final.to_excel(writer, index=False)
-    except:
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            final.to_excel(writer, index=False)
-
-    st.download_button(
-        "Download Excel",
-        output.getvalue(),
-        "DATABASE_BRI.xlsx"
-    )
