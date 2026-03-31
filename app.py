@@ -223,12 +223,12 @@ def clean_ids(x):
 
         for p in parts:
             p = p.strip()
-            found = re.findall(r'\d+', p)
+            if p != "":
+                ids.append(p)
 
-            if found:
-                ids.extend(found)
+    ids = list(set(ids))
 
-    return " ; ".join(sorted(set(ids))) if ids else "N/A"
+    return " ; ".join(sorted(ids)) if ids else "N/A"
 
 # ==============================
 # GROUPING
@@ -248,12 +248,12 @@ def grouping(db):
         "Description": lambda x: " ; ".join(x.astype(str))
     }).reset_index()
 
-    def is_valid_id(x):
-        nums = re.findall(r'\d+', str(x))
-        return len(nums) > 0
+    def is_pure_numeric(x):
+        x = str(x).strip()
+        return re.fullmatch(r'\d+( ; \d+)*', x) is not None
 
     grouped["TYPE"] = grouped["ID"].apply(
-        lambda x: "NA" if not is_valid_id(x)
+        lambda x: "NA" if not is_pure_numeric(x)
         else ("DOUBLE" if ";" in x else "NORMAL")
     )
 
