@@ -173,8 +173,11 @@ def prepare_new(df):
     db = df[[id_col, "KODE_UNIK", desc_col]].copy()
     db.columns = ["ID", "KODE_UNIK", "Description"]
 
-    db["ID"] = db["ID"].astype(str).replace(
-        ["nan", "None", "NaT", ""], "N/A"
+    db["ID"] = db["ID"].astype(str)
+
+    db["ID"] = db["ID"].apply(
+        lambda x: "N/A" if str(x).strip() == "" or str(x).lower() in ["nan", "none", "nat"]
+        else str(x).strip()
     )
 
     return db
@@ -250,7 +253,7 @@ def grouping(db):
 
     def is_pure_numeric(x):
         x = str(x).strip()
-        return re.fullmatch(r'\d+( ; \d+)*', x) is not None
+        return re.fullmatch(r'\d+', x) is not None or re.fullmatch(r'\d+( ; \d+)+', x) is not None
 
     grouped["TYPE"] = grouped["ID"].apply(
         lambda x: "NA" if not is_pure_numeric(x)
