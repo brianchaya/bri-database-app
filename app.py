@@ -272,7 +272,7 @@ def grouping(db):
     normal = grouped[grouped["TYPE"] == "NORMAL"]
     double = grouped[grouped["TYPE"] == "DOUBLE"]
 
-    db_na = db_na.drop_duplicates(subset=["Description"])
+    db_na = db_na.drop_duplicates(subset=["ID", "Description"])
 
     db_na["TYPE"] = "NA"
 
