@@ -253,7 +253,16 @@ def grouping(db):
 
     def is_pure_numeric(x):
         x = str(x).strip()
-        return re.fullmatch(r'\d+', x) is not None or re.fullmatch(r'\d+( ; \d+)+', x) is not None
+    
+        # split kalau ada multiple ID
+        parts = x.split(";")
+    
+        for p in parts:
+            p = p.strip()
+            if not p.isdigit():
+                return False
+    
+        return True
 
     grouped["TYPE"] = grouped["ID"].apply(
         lambda x: "NA" if not is_pure_numeric(x)
