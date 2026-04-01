@@ -202,16 +202,8 @@ def filter_new_only(existing, new):
         ~new_valid["KODE_UNIK"].isin(existing_codes)
     ]
 
-    existing_na_pair = set(
-        zip(
-            existing[existing["KODE_UNIK"] == "N/A"]["ID"],
-            existing[existing["KODE_UNIK"] == "N/A"]["Description"]
-        )
-    )
-    
-    new_na = new_na[
-        ~new_na.apply(lambda x: (x["ID"], x["Description"]) in existing_na_pair, axis=1)
-    ]
+    # jangan filter NA sama sekali
+    new_na = new_na
 
     filtered = pd.concat([new_valid, new_na], ignore_index=True)
 
