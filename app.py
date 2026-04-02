@@ -236,27 +236,22 @@ def filter_new_only(existing, new):
     # =========================
     # 🔥 NON N/A → PAIR MATCH (SUDAH AKURAT)
     # =========================
-    # =========================
-    # 🔥 NON N/A → HANYA BUANG YANG 100% IDENTIK
-    # =========================
-    
-    existing_full = set(
+    existing_pairs = set(
         existing.loc[existing["KODE_UNIK"] != "N/A"]
-        .apply(lambda x: f"{x['ID']}||{x['KODE_UNIK']}||{x['Description']}", axis=1)
+        .apply(lambda x: f"{x['KODE_UNIK']}||{x['ID']}", axis=1)
     )
-    
+
     new_valid = new[new["KODE_UNIK"] != "N/A"].copy()
-    
-    new_valid["FULL_KEY"] = new_valid.apply(
-        lambda x: f"{x['ID']}||{x['KODE_UNIK']}||{x['Description']}", axis=1
+
+    new_valid["PAIR"] = new_valid.apply(
+        lambda x: f"{x['KODE_UNIK']}||{x['ID']}", axis=1
     )
-    
-    # ❗ hanya buang yg 100% sama
+
     new_valid = new_valid[
-        ~new_valid["FULL_KEY"].isin(existing_full)
+        ~new_valid["PAIR"].isin(existing_pairs)
     ]
-    
-    new_valid = new_valid.drop(columns=["FULL_KEY"])
+
+    new_valid = new_valid.drop(columns=["PAIR"])
 
     # =========================
     # N/A → EXACT DESCRIPTION
@@ -425,18 +420,14 @@ if uploaded_file:
         # 🔥 JANGAN GROUPING ULANG
         new_final = filtered_new.copy()
         
-        # detect DOUBLE 2 arah
-        id_count = new_final.groupby("ID")["KODE_UNIK"].nunique()
-        kode_count = new_final.groupby("KODE_UNIK")["ID"].nunique()
-        
+        # tentuin TYPE manual
         def get_type(row):
             if row["KODE_UNIK"] == "N/A":
                 return "NA"
-        
-            if id_count[row["ID"]] > 1 or kode_count[row["KODE_UNIK"]] > 1:
+            elif ";" in str(row["ID"]):
                 return "DOUBLE"
-        
-            return "NORMAL"
+            else:
+                return "NORMAL"
         
         new_final["TYPE"] = new_final.apply(get_type, axis=1)
         
