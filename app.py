@@ -393,8 +393,19 @@ if uploaded_file:
             new_final = pd.DataFrame(columns=["ID","KODE_UNIK","Description","TYPE"])
             n_normal = n_double = n_na = pd.DataFrame()
         else:
-            n_normal, n_double, n_na = grouping(filtered_new)
-            new_final = pd.concat([n_normal, n_double, n_na], ignore_index=True)
+            # 🔥 JANGAN GROUPING ULANG
+            new_final = filtered_new.copy()
+            
+            # tentuin TYPE manual
+            def get_type(row):
+                if row["KODE_UNIK"] == "N/A":
+                    return "NA"
+                elif ";" in str(row["ID"]):
+                    return "DOUBLE"
+                else:
+                    return "NORMAL"
+            
+            new_final["TYPE"] = new_final.apply(get_type, axis=1)
 
         col1, col2, col3 = st.columns(3)
         col1.metric("New Normal", len(n_normal))
