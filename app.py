@@ -184,46 +184,61 @@ def prepare_new(df):
 
 def filter_new_only(existing, new):
 
-    # normalize kode unik aja (AMAN)
+    # copy biar ga ngerusak asli
+    existing = existing.copy()
+    new = new.copy()
+
+    # normalize
     existing["KODE_UNIK"] = existing["KODE_UNIK"].apply(normalize_kode)
     new["KODE_UNIK"] = new["KODE_UNIK"].apply(normalize_kode)
 
+    existing["Description"] = existing["Description"].astype(str).str.strip()
+    new["Description"] = new["Description"].astype(str).str.strip()
+
     # =========================
-    # NON N/A → BASED ON KODE_UNIK ONLY
+    # 🔥 CLEAN EXISTING FIRST (PENTING BANGET)
     # =========================
+
+    existing = existing.drop_duplicates(subset=["ID", "KODE_UNIK", "Description"])
+
+    # =========================
+    # NON N/A → KODE_UNIK ONLY
+    # =========================
+
     existing_codes = set(
         existing.loc[existing["KODE_UNIK"] != "N/A", "KODE_UNIK"]
     )
 
     new_valid = new[new["KODE_UNIK"] != "N/A"]
 
-    # 🔥 hanya cek kode unik (NO DESCRIPTION CHECK)
     new_valid = new_valid[
         ~new_valid["KODE_UNIK"].isin(existing_codes)
     ]
 
     # =========================
-    # N/A → EXACT DESCRIPTION MATCH
+    # 🔥 N/A → EXACT STRING MATCH (SUPER STRICT)
     # =========================
+
     existing_na_desc = set(
         existing.loc[existing["KODE_UNIK"] == "N/A", "Description"]
-        .astype(str)
-        .str.strip()
     )
 
     new_na = new[new["KODE_UNIK"] == "N/A"]
 
-    # 🔥 STRICT: harus sama persis
     new_na = new_na[
-        ~new_na["Description"].astype(str).str.strip().isin(existing_na_desc)
+        ~new_na["Description"].isin(existing_na_desc)
     ]
 
     # =========================
-    # FINAL
+    # 🔥 FINAL CLEAN (ANTI LOLOS)
     # =========================
-    filtered = pd.concat([new_valid, new_na], ignore_index=True)
 
-    return filtered
+    final = pd.concat([new_valid, new_na], ignore_index=True)
+
+    # 🔥 BUANG DUPLIKAT DI NEW ITSELF
+    final = final.drop_duplicates(subset=["ID", "KODE_UNIK", "Description"])
+
+    return final
 
 # ==============================
 # CLEAN ID
@@ -293,7 +308,7 @@ def grouping(db):
     normal = grouped[grouped["TYPE"] == "NORMAL"]
     double = grouped[grouped["TYPE"] == "DOUBLE"]
 
-    db_na = db_na.drop_duplicates(subset=["Description"])
+    db_na = db_na.drop_duplicates(subset=["ID", "Description"])
     
     db_na["TYPE"] = "NA"
 
