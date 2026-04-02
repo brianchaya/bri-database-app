@@ -182,59 +182,41 @@ def prepare_new(df):
 
     return db
 
-# ==============================
-# FILTER NEW ONLY (NO N/A)
-# ==============================
 def filter_new_only(existing, new):
 
+    # normalize kode unik aja (AMAN)
     existing["KODE_UNIK"] = existing["KODE_UNIK"].apply(normalize_kode)
     new["KODE_UNIK"] = new["KODE_UNIK"].apply(normalize_kode)
 
-    # ambil kode unik existing (selain N/A)
+    # =========================
+    # NON N/A → BASED ON KODE_UNIK ONLY
+    # =========================
     existing_codes = set(
-        existing[existing["KODE_UNIK"] != "N/A"]["KODE_UNIK"]
+        existing.loc[existing["KODE_UNIK"] != "N/A", "KODE_UNIK"]
     )
 
     new_valid = new[new["KODE_UNIK"] != "N/A"]
-    new_na = new[new["KODE_UNIK"] == "N/A"]
 
+    # 🔥 hanya cek kode unik (NO DESCRIPTION CHECK)
     new_valid = new_valid[
         ~new_valid["KODE_UNIK"].isin(existing_codes)
     ]
 
     # =========================
-    # CLEAN DESC (SUPER STRICT)
+    # N/A → EXACT DESCRIPTION MATCH
     # =========================
-    def clean_desc(x):
-        x = str(x).upper()
-
-        x = re.sub(r'ESB:[A-Z0-9]+:\d+', '', x)   # buang ESB
-        x = re.sub(r'\d{6,}', '', x)              # buang angka panjang
-        x = re.sub(r'[^A-Z ]', '', x)             # buang simbol
-        x = re.sub(r'\s+', ' ', x)
-
-        return x.strip()
-
-    # =========================
-    # FILTER NA VS EXISTING
-    # =========================
-    existing_na_keys = set(
-        existing[existing["KODE_UNIK"] == "N/A"]["Description"]
-        .apply(clean_desc)
+    existing_na_desc = set(
+        existing.loc[existing["KODE_UNIK"] == "N/A", "Description"]
+        .astype(str)
+        .str.strip()
     )
 
+    new_na = new[new["KODE_UNIK"] == "N/A"]
+
+    # 🔥 STRICT: harus sama persis
     new_na = new_na[
-        ~new_na["Description"].apply(clean_desc).isin(existing_na_keys)
+        ~new_na["Description"].astype(str).str.strip().isin(existing_na_desc)
     ]
-
-    # =========================
-    # 🔥 DEDUP SESAMA NEW NA
-    # =========================
-    new_na["__KEY__"] = new_na["Description"].apply(clean_desc)
-
-    new_na = new_na.drop_duplicates(subset="__KEY__")
-
-    new_na = new_na.drop(columns="__KEY__")
 
     # =========================
     # FINAL
