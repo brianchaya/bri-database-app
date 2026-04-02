@@ -385,7 +385,10 @@ if uploaded_file:
         exist_df["TYPE"] = "EXISTING"
         exist_df["KODE_UNIK"] = exist_df["KODE_UNIK"].apply(normalize_kode)
 
-      # 🔥 JANGAN GROUPING ULANG
+        # 🔥 FILTER
+        filtered_new = filter_new_only(exist_all, new_db)
+        
+        # 🔥 JANGAN GROUPING ULANG
         new_final = filtered_new.copy()
         
         # tentuin TYPE manual
