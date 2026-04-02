@@ -364,9 +364,8 @@ if uploaded_file:
 
         # 🔥 SPLIT
         exist_df, old_new = split_existing_and_new(exist_df_raw)
-
-        # 🔥 MERGE
-        exist_df = pd.concat([exist_df, old_new], ignore_index=True)
+        
+        # 🔥 JANGAN DIGABUNG LAGI
         exist_df = sort_by_id(exist_df)
 
         exist_df["TYPE"] = "EXISTING"
