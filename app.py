@@ -188,12 +188,37 @@ def filter_new_only(existing, new):
     new = new.copy()
 
     # =========================
-    # 🔥 SAMAIN RULE SAMA GROUPING
+    # 🔥 FUNCTION: EXPLODE EXISTING (KUNCI UTAMA)
+    # =========================
+    def explode_existing(df):
+        rows = []
+
+        for _, row in df.iterrows():
+            kode = row["KODE_UNIK"]
+            desc = row["Description"]
+
+            ids = str(row["ID"]).split(";")
+
+            for i in ids:
+                i = i.strip()
+                if i != "":
+                    rows.append({
+                        "ID": i,
+                        "KODE_UNIK": kode,
+                        "Description": desc
+                    })
+
+        return pd.DataFrame(rows)
+
+    # 🔥 EXPLODE DULU
+    existing = explode_existing(existing)
+
+    # =========================
+    # SAMAIN RULE
     # =========================
     def is_numeric(x):
         return str(x).strip().isdigit()
 
-    # paksa KODE_UNIK jadi N/A kalau ID bukan numeric
     existing.loc[~existing["ID"].apply(is_numeric), "KODE_UNIK"] = "N/A"
     new.loc[~new["ID"].apply(is_numeric), "KODE_UNIK"] = "N/A"
 
@@ -206,28 +231,28 @@ def filter_new_only(existing, new):
     existing["Description"] = existing["Description"].astype(str).str.strip().str.upper()
     new["Description"] = new["Description"].astype(str).str.strip().str.upper()
 
-    # buang duplikat existing dulu
     existing = existing.drop_duplicates(subset=["ID","KODE_UNIK","Description"])
 
-    # NON N/A → FULL BLOCK BY KODE_UNIK
     # =========================
-    
+    # 🔥 NON N/A → PAIR MATCH (SUDAH AKURAT)
+    # =========================
     existing_pairs = set(
         existing.loc[existing["KODE_UNIK"] != "N/A"]
         .apply(lambda x: f"{x['KODE_UNIK']}||{x['ID']}", axis=1)
     )
-    
-    new_valid = new[new["KODE_UNIK"] != "N/A"]
-    
+
+    new_valid = new[new["KODE_UNIK"] != "N/A"].copy()
+
     new_valid["PAIR"] = new_valid.apply(
         lambda x: f"{x['KODE_UNIK']}||{x['ID']}", axis=1
     )
-    
+
     new_valid = new_valid[
         ~new_valid["PAIR"].isin(existing_pairs)
     ]
-    
+
     new_valid = new_valid.drop(columns=["PAIR"])
+
     # =========================
     # N/A → EXACT DESCRIPTION
     # =========================
@@ -246,7 +271,6 @@ def filter_new_only(existing, new):
     # =========================
     final = pd.concat([new_valid, new_na], ignore_index=True)
 
-    # 🔥 BUANG DUPLIKAT DALAM NEW SENDIRI
     final = final.drop_duplicates(subset=["ID","KODE_UNIK","Description"])
 
     return final
