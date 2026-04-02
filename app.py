@@ -347,7 +347,7 @@ def grouping(db):
     }).reset_index()
 
     grouped_by_id = db_valid.groupby("ID").agg({
-        "KODE_UNIK": clean_ids,
+        "KODE_UNIK": lambda x: list(set(x)),
         "Description": lambda x: " ; ".join(x.astype(str))
     }).reset_index()
     
@@ -358,6 +358,13 @@ def grouping(db):
     
     # 🔥 BUANG DUPLIKAT
     grouped = grouped.drop_duplicates(subset=["ID","KODE_UNIK","Description"])
+
+    def flatten_kode(x):
+        if isinstance(x, list):
+            return " ; ".join(sorted(x))
+        return x
+    
+    grouped["KODE_UNIK"] = grouped["KODE_UNIK"].apply(flatten_kode)
 
     def is_pure_numeric(x):
         x = str(x).strip()
@@ -374,16 +381,15 @@ def grouping(db):
 
     def is_double(row):
         id_part = str(row["ID"])
-        kode_part = str(row["KODE_UNIK"])
+        kode_part = row["KODE_UNIK"]
         
-        # kalau ID ga valid → NA
         if not is_pure_numeric(id_part):
             return "NA"
         
-        # 🔥 DOUBLE kalau:
-        # 1. banyak ID (existing logic)
-        # 2. banyak KODE_UNIK (logic baru)
-        if ";" in id_part or ";" in kode_part:
+        # DOUBLE kalau:
+        # 1. banyak ID
+        # 2. banyak kode unik (list > 1)
+        if ";" in id_part or (isinstance(kode_part, list) and len(kode_part) > 1):
             return "DOUBLE"
         
         return "NORMAL"
