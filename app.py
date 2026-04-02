@@ -480,17 +480,10 @@ if uploaded_file:
         # 🔥 FILTER
         filtered_new = filter_new_only(exist_all, new_db)
         
-        # 🔥 JANGAN GROUPING ULANG
-        new_final = filtered_new.copy()
+        # 🔥 WAJIB GROUPING LAGI BIAR DOUBLE KEDETECT
+        n_normal, n_double, n_na = grouping(filtered_new)
         
-        # tentuin TYPE manual
-        def get_type(row):
-            if row["KODE_UNIK"] == "N/A":
-                return "NA"
-            elif ";" in str(row["ID"]):
-                return "DOUBLE"
-            else:
-                return "NORMAL"
+        new_final = pd.concat([n_normal, n_double, n_na], ignore_index=True)
         
         new_final["TYPE"] = new_final.apply(get_type, axis=1)
         
