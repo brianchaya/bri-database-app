@@ -485,7 +485,6 @@ if uploaded_file:
         
         new_final = pd.concat([n_normal, n_double, n_na], ignore_index=True)
         
-        new_final["TYPE"] = new_final.apply(get_type, axis=1)
         
         # 🔥 HITUNG MANUAL (GANTI n_normal dll)
         n_normal = new_final[new_final["TYPE"] == "NORMAL"]
