@@ -390,8 +390,11 @@ def grouping(db):
         if not is_pure_numeric(id_part):
             return "NA"
         
-        # cek multiple ID atau multiple kode unik
-        if ";" in id_part or ";" in kode_part:
+        id_count = len([i.strip() for i in id_part.split(";") if i.strip() != ""])
+        kode_count = len([k.strip() for k in kode_part.split(";") if k.strip() != ""])
+        
+        # 🔥 DOUBLE kalau ADA conflict beneran
+        if id_count > 1 or kode_count > 1:
             return "DOUBLE"
         
         return "NORMAL"
