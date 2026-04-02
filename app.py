@@ -353,18 +353,22 @@ def grouping(db):
     
     grouped_by_id.columns = ["ID", "KODE_UNIK", "Description"]
 
-    # 🔥 GABUNGIN
     grouped = pd.concat([grouped, grouped_by_id], ignore_index=True)
-    
-    # 🔥 BUANG DUPLIKAT
-    grouped = grouped.drop_duplicates(subset=["ID","KODE_UNIK","Description"])
 
+    # =========================
+    # 🔥 FLATTEN DULU (WAJIB)
+    # =========================
     def flatten_kode(x):
         if isinstance(x, list):
             return " ; ".join(sorted(x))
         return x
     
     grouped["KODE_UNIK"] = grouped["KODE_UNIK"].apply(flatten_kode)
+    
+    # =========================
+    # 🔥 BARU BOLEH DEDUPE
+    # =========================
+    grouped = grouped.drop_duplicates(subset=["ID","KODE_UNIK","Description"])
 
     def is_pure_numeric(x):
         x = str(x).strip()
@@ -381,15 +385,13 @@ def grouping(db):
 
     def is_double(row):
         id_part = str(row["ID"])
-        kode_part = row["KODE_UNIK"]
+        kode_part = str(row["KODE_UNIK"])
         
         if not is_pure_numeric(id_part):
             return "NA"
         
-        # DOUBLE kalau:
-        # 1. banyak ID
-        # 2. banyak kode unik (list > 1)
-        if ";" in id_part or (isinstance(kode_part, list) and len(kode_part) > 1):
+        # cek multiple ID atau multiple kode unik
+        if ";" in id_part or ";" in kode_part:
             return "DOUBLE"
         
         return "NORMAL"
