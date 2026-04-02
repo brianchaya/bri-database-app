@@ -362,17 +362,25 @@ if uploaded_file:
             ["nan", "None", "NaT", ""], ""
         )
 
-        # 🔥 SPLIT
+       # 🔥 SPLIT
         exist_df, old_new = split_existing_and_new(exist_df_raw)
         
-        # 🔥 JANGAN DIGABUNG LAGI
+        # 🔥 GABUNGIN LAGI BUAT FILTER (INI KUNCINYA)
+        exist_all = pd.concat([exist_df, old_new], ignore_index=True)
+        
+        exist_all = exist_all.copy()
+        exist_all["KODE_UNIK"] = exist_all["KODE_UNIK"].apply(normalize_kode)
+        exist_all["Description"] = exist_all["Description"].astype(str).str.strip()
+        
         exist_df = sort_by_id(exist_df)
+        exist_df["TYPE"] = "EXISTING"
+        exist_df["KODE_UNIK"] = exist_df["KODE_UNIK"].apply(normalize_kode)
 
         exist_df["TYPE"] = "EXISTING"
         exist_df["KODE_UNIK"] = exist_df["KODE_UNIK"].apply(normalize_kode)
 
         # FILTER
-        filtered_new = filter_new_only(exist_df, new_db)
+        filtered_new = filter_new_only(exist_all, new_db)
 
         if filtered_new.empty:
             st.warning("No new valid data found.")
