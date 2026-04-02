@@ -236,20 +236,27 @@ def filter_new_only(existing, new):
     # =========================
     # 🔥 NON N/A → PAIR MATCH (SUDAH AKURAT)
     # =========================
-    existing_pairs = set(
+    # =========================
+    # 🔥 NON N/A → ONLY BLOCK EXACT ROW
+    # =========================
+    
+    existing_rows = set(
         existing.loc[existing["KODE_UNIK"] != "N/A"]
-        .apply(lambda x: f"{x['KODE_UNIK']}||{x['ID']}", axis=1)
+        .apply(lambda x: f"{x['ID']}||{x['KODE_UNIK']}||{x['Description']}", axis=1)
     )
-
+    
     new_valid = new[new["KODE_UNIK"] != "N/A"].copy()
-
-    new_valid["PAIR"] = new_valid.apply(
-        lambda x: f"{x['KODE_UNIK']}||{x['ID']}", axis=1
+    
+    new_valid["ROW_KEY"] = new_valid.apply(
+        lambda x: f"{x['ID']}||{x['KODE_UNIK']}||{x['Description']}", axis=1
     )
-
+    
+    # ❗ HANYA BUANG YANG 100% SAMA
     new_valid = new_valid[
-        ~new_valid["PAIR"].isin(existing_pairs)
+        ~new_valid["ROW_KEY"].isin(existing_rows)
     ]
+    
+    new_valid = new_valid.drop(columns=["ROW_KEY"])
 
     new_valid = new_valid.drop(columns=["PAIR"])
 
