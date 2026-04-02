@@ -212,17 +212,22 @@ def filter_new_only(existing, new):
     # NON N/A → FULL BLOCK BY KODE_UNIK
     # =========================
     
-    existing_codes = set(
-        existing.loc[existing["KODE_UNIK"] != "N/A", "KODE_UNIK"]
+    existing_pairs = set(
+        existing.loc[existing["KODE_UNIK"] != "N/A"]
+        .apply(lambda x: f"{x['KODE_UNIK']}||{x['ID']}", axis=1)
     )
     
     new_valid = new[new["KODE_UNIK"] != "N/A"]
     
-    # 🔥 BLOCK TOTAL (INI KUNCINYA)
+    new_valid["PAIR"] = new_valid.apply(
+        lambda x: f"{x['KODE_UNIK']}||{x['ID']}", axis=1
+    )
+    
     new_valid = new_valid[
-        ~new_valid["KODE_UNIK"].isin(existing_codes)
+        ~new_valid["PAIR"].isin(existing_pairs)
     ]
-
+    
+    new_valid = new_valid.drop(columns=["PAIR"])
     # =========================
     # N/A → EXACT DESCRIPTION
     # =========================
