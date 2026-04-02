@@ -209,15 +209,16 @@ def filter_new_only(existing, new):
     # buang duplikat existing dulu
     existing = existing.drop_duplicates(subset=["ID","KODE_UNIK","Description"])
 
+    # NON N/A → FULL BLOCK BY KODE_UNIK
     # =========================
-    # NON N/A → KODE_UNIK
-    # =========================
+    
     existing_codes = set(
         existing.loc[existing["KODE_UNIK"] != "N/A", "KODE_UNIK"]
     )
-
+    
     new_valid = new[new["KODE_UNIK"] != "N/A"]
-
+    
+    # 🔥 BLOCK TOTAL (INI KUNCINYA)
     new_valid = new_valid[
         ~new_valid["KODE_UNIK"].isin(existing_codes)
     ]
