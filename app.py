@@ -385,19 +385,24 @@ if uploaded_file:
         exist_df["TYPE"] = "EXISTING"
         exist_df["KODE_UNIK"] = exist_df["KODE_UNIK"].apply(normalize_kode)
 
-       # 🔥 JANGAN GROUPING ULANG
+      # 🔥 JANGAN GROUPING ULANG
         new_final = filtered_new.copy()
-            
+        
         # tentuin TYPE manual
         def get_type(row):
-                if row["KODE_UNIK"] == "N/A":
-                    return "NA"
-                elif ";" in str(row["ID"]):
-                    return "DOUBLE"
-                else:
-                    return "NORMAL"
-            
-            new_final["TYPE"] = new_final.apply(get_type, axis=1)
+            if row["KODE_UNIK"] == "N/A":
+                return "NA"
+            elif ";" in str(row["ID"]):
+                return "DOUBLE"
+            else:
+                return "NORMAL"
+        
+        new_final["TYPE"] = new_final.apply(get_type, axis=1)
+        
+        # 🔥 HITUNG MANUAL (GANTI n_normal dll)
+        n_normal = new_final[new_final["TYPE"] == "NORMAL"]
+        n_double = new_final[new_final["TYPE"] == "DOUBLE"]
+        n_na = new_final[new_final["TYPE"] == "NA"]
         
         col1, col2, col3 = st.columns(3)
         col1.metric("New Normal", len(n_normal))
