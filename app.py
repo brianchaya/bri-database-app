@@ -204,8 +204,17 @@ def filter_new_only(existing, new):
 
     def clean_desc(x):
         x = str(x).upper()
-        x = re.sub(r'\s+', ' ', x)           # rapihin spasi
-        x = re.sub(r'[^A-Z0-9 ]', '', x)     # buang simbol aneh
+    
+        # 🔥 BUANG BAGIAN DINAMIS ESB
+        x = re.sub(r'ESB:[A-Z0-9]+:\d+', '', x)
+    
+        # 🔥 BUANG ANGKA PANJANG (biar flow nyatu)
+        x = re.sub(r'\d{6,}', '', x)
+    
+        # rapihin
+        x = re.sub(r'[^A-Z ]', '', x)
+        x = re.sub(r'\s+', ' ', x)
+    
         return x.strip()
     
     existing_na_keys = set(
