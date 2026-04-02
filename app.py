@@ -236,27 +236,20 @@ def filter_new_only(existing, new):
     # =========================
     # 🔥 NON N/A → PAIR MATCH (SUDAH AKURAT)
     # =========================
-    # =========================
-    # 🔥 NON N/A → ONLY BLOCK EXACT ROW
-    # =========================
-    
-    existing_rows = set(
+    existing_pairs = set(
         existing.loc[existing["KODE_UNIK"] != "N/A"]
-        .apply(lambda x: f"{x['ID']}||{x['KODE_UNIK']}||{x['Description']}", axis=1)
+        .apply(lambda x: f"{x['KODE_UNIK']}||{x['ID']}", axis=1)
     )
-    
+
     new_valid = new[new["KODE_UNIK"] != "N/A"].copy()
-    
-    new_valid["ROW_KEY"] = new_valid.apply(
-        lambda x: f"{x['ID']}||{x['KODE_UNIK']}||{x['Description']}", axis=1
+
+    new_valid["PAIR"] = new_valid.apply(
+        lambda x: f"{x['KODE_UNIK']}||{x['ID']}", axis=1
     )
-    
-    # ❗ HANYA BUANG YANG 100% SAMA
+
     new_valid = new_valid[
-        ~new_valid["ROW_KEY"].isin(existing_rows)
+        ~new_valid["PAIR"].isin(existing_pairs)
     ]
-    
-    new_valid = new_valid.drop(columns=["ROW_KEY"])
 
     new_valid = new_valid.drop(columns=["PAIR"])
 
@@ -370,41 +363,6 @@ def sort_by_id(df):
     df = df.sort_values(["IS_NA", "SORT_KEY"]).drop(columns=["SORT_KEY", "IS_NA"])
 
     return df
-
-def merge_double_by_id(df):
-
-    df = df.copy()
-
-    # ambil yg bukan NA dulu
-    df_valid = df[df["KODE_UNIK"] != "N/A"].copy()
-    df_na = df[df["KODE_UNIK"] == "N/A"].copy()
-
-    # =========================
-    # 🔥 MERGE BERDASARKAN ID
-    # =========================
-    merged = df_valid.groupby("ID").agg({
-        "KODE_UNIK": lambda x: " ; ".join(sorted(set(x))),
-        "Description": lambda x: " ; ".join(sorted(set(x)))
-    }).reset_index()
-
-    # =========================
-    # TYPE
-    # =========================
-    def get_type(row):
-        if row["KODE_UNIK"] == "N/A":
-            return "NA"
-        elif ";" in row["KODE_UNIK"] or ";" in row["ID"]:
-            return "DOUBLE"
-        else:
-            return "NORMAL"
-
-    merged["TYPE"] = merged.apply(get_type, axis=1)
-
-    df_na["TYPE"] = "NA"
-
-    final = pd.concat([merged, df_na], ignore_index=True)
-
-    return final
     
 # ==============================
 # MAIN
@@ -460,27 +418,13 @@ if uploaded_file:
         filtered_new = filter_new_only(exist_all, new_db)
         
         # 🔥 JANGAN GROUPING ULANG
-        new_final = merge_double_by_id(filtered_new)
+        new_final = filtered_new.copy()
         
         # tentuin TYPE manual
-        # =========================
-        # 🔥 DETECT DOUBLE 2 ARAH
-        # =========================
-        
-        # 1. ID → banyak KODE_UNIK
-        id_count = new_final.groupby("ID")["KODE_UNIK"].nunique()
-        
-        # 2. KODE_UNIK → banyak ID
-        kode_count = new_final.groupby("KODE_UNIK")["ID"].nunique()
-        
         def get_type(row):
             if row["KODE_UNIK"] == "N/A":
                 return "NA"
-            
-            id_multi_kode = id_count.get(row["ID"], 0) > 1
-            kode_multi_id = kode_count.get(row["KODE_UNIK"], 0) > 1
-        
-            if id_multi_kode or kode_multi_id:
+            elif ";" in str(row["ID"]):
                 return "DOUBLE"
             else:
                 return "NORMAL"
