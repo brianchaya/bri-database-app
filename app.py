@@ -202,30 +202,43 @@ def filter_new_only(existing, new):
         ~new_valid["KODE_UNIK"].isin(existing_codes)
     ]
 
+    # =========================
+    # CLEAN DESC (SUPER STRICT)
+    # =========================
     def clean_desc(x):
         x = str(x).upper()
-    
-        # 🔥 BUANG BAGIAN DINAMIS ESB
-        x = re.sub(r'ESB:[A-Z0-9]+:\d+', '', x)
-    
-        # 🔥 BUANG ANGKA PANJANG (biar flow nyatu)
-        x = re.sub(r'\d{6,}', '', x)
-    
-        # rapihin
-        x = re.sub(r'[^A-Z ]', '', x)
+
+        x = re.sub(r'ESB:[A-Z0-9]+:\d+', '', x)   # buang ESB
+        x = re.sub(r'\d{6,}', '', x)              # buang angka panjang
+        x = re.sub(r'[^A-Z ]', '', x)             # buang simbol
         x = re.sub(r'\s+', ' ', x)
-    
+
         return x.strip()
-    
+
+    # =========================
+    # FILTER NA VS EXISTING
+    # =========================
     existing_na_keys = set(
-        existing[existing["KODE_UNIK"] == "N/A"]
-        .apply(lambda x: clean_desc(x["Description"]), axis=1)
+        existing[existing["KODE_UNIK"] == "N/A"]["Description"]
+        .apply(clean_desc)
     )
-    
+
     new_na = new_na[
         ~new_na["Description"].apply(clean_desc).isin(existing_na_keys)
     ]
 
+    # =========================
+    # 🔥 DEDUP SESAMA NEW NA
+    # =========================
+    new_na["__KEY__"] = new_na["Description"].apply(clean_desc)
+
+    new_na = new_na.drop_duplicates(subset="__KEY__")
+
+    new_na = new_na.drop(columns="__KEY__")
+
+    # =========================
+    # FINAL
+    # =========================
     filtered = pd.concat([new_valid, new_na], ignore_index=True)
 
     return filtered
