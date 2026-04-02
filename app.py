@@ -363,6 +363,41 @@ def sort_by_id(df):
     df = df.sort_values(["IS_NA", "SORT_KEY"]).drop(columns=["SORT_KEY", "IS_NA"])
 
     return df
+
+def merge_double_by_id(df):
+
+    df = df.copy()
+
+    # ambil yg bukan NA dulu
+    df_valid = df[df["KODE_UNIK"] != "N/A"].copy()
+    df_na = df[df["KODE_UNIK"] == "N/A"].copy()
+
+    # =========================
+    # 🔥 MERGE BERDASARKAN ID
+    # =========================
+    merged = df_valid.groupby("ID").agg({
+        "KODE_UNIK": lambda x: " ; ".join(sorted(set(x))),
+        "Description": lambda x: " ; ".join(sorted(set(x)))
+    }).reset_index()
+
+    # =========================
+    # TYPE
+    # =========================
+    def get_type(row):
+        if row["KODE_UNIK"] == "N/A":
+            return "NA"
+        elif ";" in row["KODE_UNIK"] or ";" in row["ID"]:
+            return "DOUBLE"
+        else:
+            return "NORMAL"
+
+    merged["TYPE"] = merged.apply(get_type, axis=1)
+
+    df_na["TYPE"] = "NA"
+
+    final = pd.concat([merged, df_na], ignore_index=True)
+
+    return final
     
 # ==============================
 # MAIN
@@ -418,7 +453,7 @@ if uploaded_file:
         filtered_new = filter_new_only(exist_all, new_db)
         
         # 🔥 JANGAN GROUPING ULANG
-        new_final = filtered_new.copy()
+        new_final = merge_double_by_id(filtered_new)
         
         # tentuin TYPE manual
         # =========================
