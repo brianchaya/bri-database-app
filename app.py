@@ -322,6 +322,19 @@ def grouping(db):
         "Description": lambda x: " ; ".join(x.astype(str))
     }).reset_index()
 
+    grouped_by_id = db_valid.groupby("ID").agg({
+        "KODE_UNIK": clean_ids,
+        "Description": lambda x: " ; ".join(x.astype(str))
+    }).reset_index()
+    
+    grouped_by_id.columns = ["ID", "KODE_UNIK", "Description"]
+
+    # 🔥 GABUNGIN
+    grouped = pd.concat([grouped, grouped_by_id], ignore_index=True)
+    
+    # 🔥 BUANG DUPLIKAT
+    grouped = grouped.drop_duplicates(subset=["ID","KODE_UNIK","Description"])
+
     def is_pure_numeric(x):
         x = str(x).strip()
     
@@ -335,10 +348,23 @@ def grouping(db):
     
         return True
 
-    grouped["TYPE"] = grouped["ID"].apply(
-        lambda x: "NA" if not is_pure_numeric(x)
-        else ("DOUBLE" if ";" in x else "NORMAL")
-    )
+    def is_double(row):
+        id_part = str(row["ID"])
+        kode_part = str(row["KODE_UNIK"])
+        
+        # kalau ID ga valid → NA
+        if not is_pure_numeric(id_part):
+            return "NA"
+        
+        # 🔥 DOUBLE kalau:
+        # 1. banyak ID (existing logic)
+        # 2. banyak KODE_UNIK (logic baru)
+        if ";" in id_part or ";" in kode_part:
+            return "DOUBLE"
+        
+        return "NORMAL"
+    
+    grouped["TYPE"] = grouped.apply(is_double, axis=1)
 
     normal = grouped[grouped["TYPE"] == "NORMAL"]
     double = grouped[grouped["TYPE"] == "DOUBLE"]
