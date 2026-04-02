@@ -385,7 +385,7 @@ if uploaded_file:
         exist_df["TYPE"] = "EXISTING"
         exist_df["KODE_UNIK"] = exist_df["KODE_UNIK"].apply(normalize_kode)
 
-        # 🔥 JANGAN GROUPING ULANG
+       # 🔥 JANGAN GROUPING ULANG
         new_final = filtered_new.copy()
             
         # tentuin TYPE manual
@@ -398,7 +398,7 @@ if uploaded_file:
                     return "NORMAL"
             
             new_final["TYPE"] = new_final.apply(get_type, axis=1)
- 
+        
         col1, col2, col3 = st.columns(3)
         col1.metric("New Normal", len(n_normal))
         col2.metric("New Merged", len(n_double))
