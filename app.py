@@ -188,6 +188,19 @@ def filter_new_only(existing, new):
     new = new.copy()
 
     # =========================
+    # 🔥 SIMPAN GROUP DOUBLE EXISTING
+    # =========================
+    double_map = {}
+    
+    for _, row in existing.iterrows():
+        kode = row["KODE_UNIK"]
+        ids = str(row["ID"]).split(";")
+        
+        if len(ids) > 1:
+            for i in ids:
+                double_map[i.strip()] = kode
+            
+    # =========================
     # 🔥 FUNCTION: EXPLODE EXISTING (KUNCI UTAMA)
     # =========================
     def explode_existing(df):
@@ -242,6 +255,17 @@ def filter_new_only(existing, new):
     )
 
     new_valid = new[new["KODE_UNIK"] != "N/A"].copy()
+
+    # 🔥 CEK: kalau ID ini bagian dari DOUBLE existing → paksa ikut kode lama
+    def force_existing_double(row):
+        id_val = str(row["ID"]).strip()
+        
+        if id_val in double_map:
+            row["KODE_UNIK"] = double_map[id_val]
+        
+        return row
+    
+    new_valid = new_valid.apply(force_existing_double, axis=1)
 
     new_valid["PAIR"] = new_valid.apply(
         lambda x: f"{x['KODE_UNIK']}||{x['ID']}", axis=1
