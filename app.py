@@ -369,6 +369,19 @@ def grouping(db):
     normal = grouped[grouped["TYPE"] == "NORMAL"]
     double = grouped[grouped["TYPE"] == "DOUBLE"]
 
+    # 🔥 ambil semua ID yang masuk DOUBLE
+    double_ids = set()
+    
+    for val in double["ID"]:
+        parts = str(val).split(";")
+        for p in parts:
+            double_ids.add(p.strip())
+    
+    # 🔥 buang dari NORMAL kalau ID-nya udah ada di DOUBLE
+    normal = normal[
+        ~normal["ID"].apply(lambda x: any(i.strip() in double_ids for i in str(x).split(";")))
+    ]
+
     db_na = db_na.drop_duplicates(subset=["ID", "Description"])
     
     db_na["TYPE"] = "NA"
