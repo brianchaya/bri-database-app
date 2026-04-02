@@ -184,27 +184,34 @@ def prepare_new(df):
 
 def filter_new_only(existing, new):
 
-    # copy biar ga ngerusak asli
     existing = existing.copy()
     new = new.copy()
 
-    # normalize
+    # =========================
+    # 🔥 SAMAIN RULE SAMA GROUPING
+    # =========================
+    def is_numeric(x):
+        return str(x).strip().isdigit()
+
+    # paksa KODE_UNIK jadi N/A kalau ID bukan numeric
+    existing.loc[~existing["ID"].apply(is_numeric), "KODE_UNIK"] = "N/A"
+    new.loc[~new["ID"].apply(is_numeric), "KODE_UNIK"] = "N/A"
+
+    # =========================
+    # CLEAN
+    # =========================
     existing["KODE_UNIK"] = existing["KODE_UNIK"].apply(normalize_kode)
     new["KODE_UNIK"] = new["KODE_UNIK"].apply(normalize_kode)
 
-    existing["Description"] = existing["Description"].astype(str).str.strip()
-    new["Description"] = new["Description"].astype(str).str.strip()
+    existing["Description"] = existing["Description"].astype(str).str.strip().str.upper()
+    new["Description"] = new["Description"].astype(str).str.strip().str.upper()
+
+    # buang duplikat existing dulu
+    existing = existing.drop_duplicates(subset=["ID","KODE_UNIK","Description"])
 
     # =========================
-    # 🔥 CLEAN EXISTING FIRST (PENTING BANGET)
+    # NON N/A → KODE_UNIK
     # =========================
-
-    existing = existing.drop_duplicates(subset=["ID", "KODE_UNIK", "Description"])
-
-    # =========================
-    # NON N/A → KODE_UNIK ONLY
-    # =========================
-
     existing_codes = set(
         existing.loc[existing["KODE_UNIK"] != "N/A", "KODE_UNIK"]
     )
@@ -216,9 +223,8 @@ def filter_new_only(existing, new):
     ]
 
     # =========================
-    # 🔥 N/A → EXACT STRING MATCH (SUPER STRICT)
+    # N/A → EXACT DESCRIPTION
     # =========================
-
     existing_na_desc = set(
         existing.loc[existing["KODE_UNIK"] == "N/A", "Description"]
     )
@@ -230,16 +236,15 @@ def filter_new_only(existing, new):
     ]
 
     # =========================
-    # 🔥 FINAL CLEAN (ANTI LOLOS)
+    # FINAL
     # =========================
-
     final = pd.concat([new_valid, new_na], ignore_index=True)
 
-    # 🔥 BUANG DUPLIKAT DI NEW ITSELF
-    final = final.drop_duplicates(subset=["ID", "KODE_UNIK", "Description"])
+    # 🔥 BUANG DUPLIKAT DALAM NEW SENDIRI
+    final = final.drop_duplicates(subset=["ID","KODE_UNIK","Description"])
 
     return final
-
+    
 # ==============================
 # CLEAN ID
 # ==============================
