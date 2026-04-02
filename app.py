@@ -421,10 +421,24 @@ if uploaded_file:
         new_final = filtered_new.copy()
         
         # tentuin TYPE manual
+        # =========================
+        # 🔥 DETECT DOUBLE 2 ARAH
+        # =========================
+        
+        # 1. ID → banyak KODE_UNIK
+        id_count = new_final.groupby("ID")["KODE_UNIK"].nunique()
+        
+        # 2. KODE_UNIK → banyak ID
+        kode_count = new_final.groupby("KODE_UNIK")["ID"].nunique()
+        
         def get_type(row):
             if row["KODE_UNIK"] == "N/A":
                 return "NA"
-            elif ";" in str(row["ID"]):
+            
+            id_multi_kode = id_count.get(row["ID"], 0) > 1
+            kode_multi_id = kode_count.get(row["KODE_UNIK"], 0) > 1
+        
+            if id_multi_kode or kode_multi_id:
                 return "DOUBLE"
             else:
                 return "NORMAL"
