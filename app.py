@@ -202,8 +202,15 @@ def filter_new_only(existing, new):
         ~new_valid["KODE_UNIK"].isin(existing_codes)
     ]
 
-    # jangan filter NA sama sekali
-    new_na = new_na
+    # filter NA berdasarkan Description + ID biar ga duplicate lagi
+    existing_na_keys = set(
+        existing[existing["KODE_UNIK"] == "N/A"]
+        .apply(lambda x: f"{x['ID']}||{x['Description']}", axis=1)
+    )
+    
+    new_na = new_na[
+        ~new_na.apply(lambda x: f"{x['ID']}||{x['Description']}", axis=1).isin(existing_na_keys)
+    ]
 
     filtered = pd.concat([new_valid, new_na], ignore_index=True)
 
