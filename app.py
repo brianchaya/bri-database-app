@@ -326,46 +326,99 @@ def grouping(db):
     db = db.copy()
     db["KODE_UNIK"] = db["KODE_UNIK"].apply(normalize_kode)
 
-    # =========================
-    # FILTER NUMERIC ID
-    # =========================
-    def is_numeric(x):
-        return str(x).strip().isdigit()
+    # 🔥 FORCE NON-NUMERIC ID MASUK NA
+    def is_pure_numeric_single(x):
+        x = str(x).strip()
+        return x.isdigit()
+    
+    db["IS_NUMERIC_ID"] = db["ID"].apply(is_pure_numeric_single)
+    
+    # override: kalau ID bukan numeric → paksa jadi NA
+    db.loc[db["IS_NUMERIC_ID"] == False, "KODE_UNIK"] = "N/A"
+    
+    db_na = db[db["KODE_UNIK"] == "N/A"].copy()
+    db_valid = db[db["KODE_UNIK"] != "N/A"].copy()
 
-    db["IS_NUMERIC"] = db["ID"].apply(is_numeric)
+    db_valid = db_valid.drop_duplicates(subset=["ID", "KODE_UNIK", "Description"])
 
-    db_na = db[~db["IS_NUMERIC"] | (db["KODE_UNIK"] == "N/A")].copy()
-    db_valid = db[db["IS_NUMERIC"] & (db["KODE_UNIK"] != "N/A")].copy()
-
-    # =========================
-    # GROUP BY ID ONLY
-    # =========================
-    grouped = db_valid.groupby("ID").agg({
-        "KODE_UNIK": lambda x: sorted(set(x)),
+    grouped = db_valid.groupby("KODE_UNIK").agg({
+        "ID": clean_ids,
         "Description": lambda x: " ; ".join(x.astype(str))
     }).reset_index()
 
-    # flatten kode
-    grouped["KODE_UNIK"] = grouped["KODE_UNIK"].apply(
-        lambda x: " ; ".join(x)
-    )
+    grouped_by_id = db_valid.groupby("ID").agg({
+        "KODE_UNIK": lambda x: list(set(x)),
+        "Description": lambda x: " ; ".join(x.astype(str))
+    }).reset_index()
+    
+    grouped_by_id.columns = ["ID", "KODE_UNIK", "Description"]
+
+    grouped = pd.concat([grouped, grouped_by_id], ignore_index=True)
 
     # =========================
-    # TYPE LOGIC (CLEAN)
+    # 🔥 FLATTEN DULU (WAJIB)
     # =========================
-    def get_type(kode):
-        kode_list = [k.strip() for k in str(kode).split(";") if k.strip()]
-        return "DOUBLE" if len(kode_list) > 1 else "NORMAL"
+    def flatten_kode(x):
+        if isinstance(x, list):
+            return " ; ".join(sorted(x))
+        return x
+    
+    grouped["KODE_UNIK"] = grouped["KODE_UNIK"].apply(flatten_kode)
+    
+    # =========================
+    # 🔥 BARU BOLEH DEDUPE
+    # =========================
+    grouped = grouped.drop_duplicates(subset=["ID","KODE_UNIK","Description"])
 
-    grouped["TYPE"] = grouped["KODE_UNIK"].apply(get_type)
+    def is_pure_numeric(x):
+        x = str(x).strip()
+    
+        # split kalau ada multiple ID
+        parts = x.split(";")
+    
+        for p in parts:
+            p = p.strip()
+            if not p.isdigit():
+                return False
+    
+        return True
+
+    def is_double(row):
+        id_part = str(row["ID"])
+        kode_part = str(row["KODE_UNIK"])
+        
+        if not is_pure_numeric(id_part):
+            return "NA"
+        
+        id_count = len([i.strip() for i in id_part.split(";") if i.strip() != ""])
+        kode_count = len([k.strip() for k in kode_part.split(";") if k.strip() != ""])
+        
+        # 🔥 DOUBLE kalau ADA conflict beneran
+        if id_count > 1 or kode_count > 1:
+            return "DOUBLE"
+        
+        return "NORMAL"
+    
+    grouped["TYPE"] = grouped.apply(is_double, axis=1)
 
     normal = grouped[grouped["TYPE"] == "NORMAL"]
     double = grouped[grouped["TYPE"] == "DOUBLE"]
 
-    # =========================
-    # NA
-    # =========================
+    # 🔥 ambil semua ID yang masuk DOUBLE
+    double_ids = set()
+    
+    for val in double["ID"]:
+        parts = str(val).split(";")
+        for p in parts:
+            double_ids.add(p.strip())
+    
+    # 🔥 buang dari NORMAL kalau ID-nya udah ada di DOUBLE
+    normal = normal[
+        ~normal["ID"].apply(lambda x: any(i.strip() in double_ids for i in str(x).split(";")))
+    ]
+
     db_na = db_na.drop_duplicates(subset=["ID", "Description"])
+    
     db_na["TYPE"] = "NA"
 
     return normal, double, db_na
