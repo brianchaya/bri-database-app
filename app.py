@@ -188,17 +188,22 @@ def filter_new_only(existing, new):
     new = new.copy()
 
     # =========================
-    # BUILD DOUBLE MAP dari existing
+    # 🔥 BUILD: semua ID yang sudah ada di existing (SEBELUM explode)
+    # Ini cover kasus KODE_UNIK multiple maupun ID multiple
     # =========================
-    double_map = {}
-    
+    existing_id_set = set()
+    existing_kode_map = {}  # id -> set of kode
+
     for _, row in existing.iterrows():
-        kode = row["KODE_UNIK"]
-        ids = str(row["ID"]).split(";")
+        ids = [i.strip() for i in str(row["ID"]).split(";") if i.strip()]
+        kodes = [k.strip() for k in str(row["KODE_UNIK"]).split(";") if k.strip()]
         
-        if len(ids) > 1:
-            for i in ids:
-                double_map[i.strip()] = kode
+        for i in ids:
+            existing_id_set.add(i)
+            if i not in existing_kode_map:
+                existing_kode_map[i] = set()
+            for k in kodes:
+                existing_kode_map[i].add(k)
 
     # =========================
     # EXPLODE EXISTING
@@ -206,16 +211,15 @@ def filter_new_only(existing, new):
     def explode_existing(df):
         rows = []
         for _, row in df.iterrows():
-            kode = row["KODE_UNIK"]
+            ids = [i.strip() for i in str(row["ID"]).split(";") if i.strip()]
+            kodes = [k.strip() for k in str(row["KODE_UNIK"]).split(";") if k.strip()]
             desc = row["Description"]
-            ids = str(row["ID"]).split(";")
             for i in ids:
-                i = i.strip()
-                if i != "":
-                    rows.append({"ID": i, "KODE_UNIK": kode, "Description": desc})
+                for k in kodes:
+                    rows.append({"ID": i, "KODE_UNIK": k, "Description": desc})
         return pd.DataFrame(rows)
 
-    existing = explode_existing(existing)
+    existing_exploded = explode_existing(existing)
 
     # =========================
     # NORMALIZE
@@ -223,61 +227,48 @@ def filter_new_only(existing, new):
     def is_numeric(x):
         return str(x).strip().isdigit()
 
-    existing.loc[~existing["ID"].apply(is_numeric), "KODE_UNIK"] = "N/A"
+    existing_exploded.loc[~existing_exploded["ID"].apply(is_numeric), "KODE_UNIK"] = "N/A"
     new.loc[~new["ID"].apply(is_numeric), "KODE_UNIK"] = "N/A"
 
-    existing["KODE_UNIK"] = existing["KODE_UNIK"].apply(normalize_kode)
+    existing_exploded["KODE_UNIK"] = existing_exploded["KODE_UNIK"].apply(normalize_kode)
     new["KODE_UNIK"] = new["KODE_UNIK"].apply(normalize_kode)
 
-    existing["Description"] = existing["Description"].astype(str).str.strip().str.upper()
+    existing_exploded["Description"] = existing_exploded["Description"].astype(str).str.strip().str.upper()
     new["Description"] = new["Description"].astype(str).str.strip().str.upper()
 
-    existing = existing.drop_duplicates(subset=["ID", "KODE_UNIK", "Description"])
+    existing_exploded = existing_exploded.drop_duplicates(subset=["ID", "KODE_UNIK", "Description"])
 
     # =========================
     # BUILD existing pairs (non N/A)
     # =========================
     existing_pairs = set(
-        existing.loc[existing["KODE_UNIK"] != "N/A"]
+        existing_exploded.loc[existing_exploded["KODE_UNIK"] != "N/A"]
         .apply(lambda x: f"{x['KODE_UNIK']}||{x['ID']}", axis=1)
     )
-
-    # 🔥 TAMBAHAN: build existing ID set (semua ID yg sudah ada, apapun kode-nya)
-    existing_all_ids = set(existing["ID"].astype(str).str.strip())
 
     # =========================
     # NON N/A: filter new
     # =========================
     new_valid = new[new["KODE_UNIK"] != "N/A"].copy()
 
-    # Force kode dari double_map kalau ID sudah ada di merged existing
-    def force_existing_double(row):
-        id_val = str(row["ID"]).strip()
-        if id_val in double_map:
-            row["KODE_UNIK"] = double_map[id_val]
-        return row
+    # 🔥 Kalau ID sudah ada di existing → SKIP (apapun kode-nya)
+    # Ini handle kasus KODE_UNIK multiple (FIRMA OKTAVI ; FIRMA OKTAVIAN)
+    new_valid = new_valid[
+        ~new_valid["ID"].astype(str).str.strip().isin(existing_id_set)
+    ]
 
-    new_valid = new_valid.apply(force_existing_double, axis=1)
-
+    # Cek pair untuk ID yang belum ada di existing sama sekali
     new_valid["PAIR"] = new_valid.apply(
         lambda x: f"{x['KODE_UNIK']}||{x['ID']}", axis=1
     )
-
     new_valid = new_valid[~new_valid["PAIR"].isin(existing_pairs)]
-
-    # 🔥 TAMBAHAN: buang juga ID yang sudah ada di existing (dengan KODE apapun)
-    # ini yang bikin double lama muncul lagi sebagai new
-    new_valid = new_valid[
-        ~new_valid["ID"].astype(str).str.strip().isin(existing_all_ids)
-    ]
-
     new_valid = new_valid.drop(columns=["PAIR"])
 
     # =========================
     # N/A: filter by exact description
     # =========================
     existing_na_desc = set(
-        existing.loc[existing["KODE_UNIK"] == "N/A", "Description"]
+        existing_exploded.loc[existing_exploded["KODE_UNIK"] == "N/A", "Description"]
     )
 
     new_na = new[new["KODE_UNIK"] == "N/A"]
