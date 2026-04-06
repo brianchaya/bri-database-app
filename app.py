@@ -188,25 +188,8 @@ def filter_new_only(existing, new):
     new = new.copy()
 
     # =========================
-    # 🔥 BUILD: semua ID yang sudah ada di existing (SEBELUM explode)
-    # Ini cover kasus KODE_UNIK multiple maupun ID multiple
-    # =========================
-    existing_id_set = set()
-    existing_kode_map = {}  # id -> set of kode
-
-    for _, row in existing.iterrows():
-        ids = [i.strip() for i in str(row["ID"]).split(";") if i.strip()]
-        kodes = [k.strip() for k in str(row["KODE_UNIK"]).split(";") if k.strip()]
-        
-        for i in ids:
-            existing_id_set.add(i)
-            if i not in existing_kode_map:
-                existing_kode_map[i] = set()
-            for k in kodes:
-                existing_kode_map[i].add(k)
-
-    # =========================
-    # EXPLODE EXISTING
+    # BUILD: explode semua kombinasi ID x KODE dari existing
+    # Handle kasus KODE_UNIK multiple (FIRMA OKTAVI ; FIRMA OKTAVIAN)
     # =========================
     def explode_existing(df):
         rows = []
@@ -239,29 +222,26 @@ def filter_new_only(existing, new):
     existing_exploded = existing_exploded.drop_duplicates(subset=["ID", "KODE_UNIK", "Description"])
 
     # =========================
-    # BUILD existing pairs (non N/A)
+    # 🔥 BUILD: set pair ID||KODE (untuk non-N/A)
+    # Ini yang handle DOUBLE lama (KODE multiple) dengan benar
     # =========================
-    existing_pairs = set(
+    existing_id_kode_pairs = set(
         existing_exploded.loc[existing_exploded["KODE_UNIK"] != "N/A"]
-        .apply(lambda x: f"{x['KODE_UNIK']}||{x['ID']}", axis=1)
+        .apply(lambda x: f"{x['ID']}||{x['KODE_UNIK']}", axis=1)
     )
 
     # =========================
-    # NON N/A: filter new
+    # NON N/A: filter new pakai ID||KODE pair
+    # Kalau pair sudah ada → buang (duplikat)
+    # Kalau ID sama tapi KODE beda → LOLOS (data baru legit)
     # =========================
     new_valid = new[new["KODE_UNIK"] != "N/A"].copy()
 
-    # 🔥 Kalau ID sudah ada di existing → SKIP (apapun kode-nya)
-    # Ini handle kasus KODE_UNIK multiple (FIRMA OKTAVI ; FIRMA OKTAVIAN)
-    new_valid = new_valid[
-        ~new_valid["ID"].astype(str).str.strip().isin(existing_id_set)
-    ]
-
-    # Cek pair untuk ID yang belum ada di existing sama sekali
     new_valid["PAIR"] = new_valid.apply(
-        lambda x: f"{x['KODE_UNIK']}||{x['ID']}", axis=1
+        lambda x: f"{x['ID']}||{x['KODE_UNIK']}", axis=1
     )
-    new_valid = new_valid[~new_valid["PAIR"].isin(existing_pairs)]
+
+    new_valid = new_valid[~new_valid["PAIR"].isin(existing_id_kode_pairs)]
     new_valid = new_valid.drop(columns=["PAIR"])
 
     # =========================
