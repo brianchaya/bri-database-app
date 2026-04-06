@@ -411,87 +411,60 @@ if uploaded_file:
 
     if existing_file:
 
-        exist_df_raw = load_existing(existing_file)
-        exist_df_raw.columns = [c.upper() for c in exist_df_raw.columns]
+    exist_df_raw = load_existing(existing_file)
+    exist_df_raw.columns = [c.upper() for c in exist_df_raw.columns]
 
-        if "DESCRIPTION" not in exist_df_raw.columns:
-            exist_df_raw["DESCRIPTION"] = ""
+    if "DESCRIPTION" not in exist_df_raw.columns:
+        exist_df_raw["DESCRIPTION"] = ""
 
-        exist_df_raw = exist_df_raw[["ID", "KODE_UNIK", "DESCRIPTION"]]
-        exist_df_raw.columns = ["ID", "KODE_UNIK", "Description"]
+    exist_df_raw = exist_df_raw[["ID", "KODE_UNIK", "DESCRIPTION"]]
+    exist_df_raw.columns = ["ID", "KODE_UNIK", "Description"]
+    exist_df_raw = exist_df_raw.fillna("N/A")
 
-        exist_df_raw = exist_df_raw.fillna("N/A")
+    exist_df_raw["ID"] = exist_df_raw["ID"].astype(str).replace(["nan","None","NaT",""], "N/A")
+    exist_df_raw["KODE_UNIK"] = exist_df_raw["KODE_UNIK"].astype(str).replace(["nan","None","NaT",""], "N/A")
+    exist_df_raw["Description"] = exist_df_raw["Description"].astype(str).replace(["nan","None","NaT",""], "")
 
-        exist_df_raw["ID"] = exist_df_raw["ID"].astype(str).replace(
-            ["nan", "None", "NaT", ""], "N/A"
-        )
-        
-        exist_df_raw["KODE_UNIK"] = exist_df_raw["KODE_UNIK"].astype(str).replace(
-            ["nan", "None", "NaT", ""], "N/A"
-        )
-        
-        exist_df_raw["Description"] = exist_df_raw["Description"].astype(str).replace(
-            ["nan", "None", "NaT", ""], ""
-        )
+    # SPLIT
+    exist_df, old_new = split_existing_and_new(exist_df_raw)
 
-       # 🔥 SPLIT
-        exist_df, old_new = split_existing_and_new(exist_df_raw)
-        
-        # 🔥 GABUNGIN LAGI BUAT FILTER (INI KUNCINYA)
-        exist_all = pd.concat([exist_df, old_new], ignore_index=True)
-        
-        exist_all = exist_all.copy()
-        exist_all["KODE_UNIK"] = exist_all["KODE_UNIK"].apply(normalize_kode)
-        exist_all["Description"] = exist_all["Description"].astype(str).str.strip()
-        
-        exist_df = sort_by_id(exist_df)
-        exist_df["TYPE"] = "EXISTING"
-        exist_df["KODE_UNIK"] = exist_df["KODE_UNIK"].apply(normalize_kode)
+    # 🔥 PROMOTE old_new → jadi EXISTING (bukan dibuang!)
+    if not old_new.empty:
+        old_new = old_new.copy()
+        old_new["TYPE"] = "EXISTING"
+        exist_df = pd.concat([exist_df, old_new], ignore_index=True)
 
-        exist_df["TYPE"] = "EXISTING"
-        exist_df["KODE_UNIK"] = exist_df["KODE_UNIK"].apply(normalize_kode)
+    # GABUNGIN untuk keperluan filter
+    exist_all = exist_df.copy()
+    exist_all["KODE_UNIK"] = exist_all["KODE_UNIK"].apply(normalize_kode)
+    exist_all["Description"] = exist_all["Description"].astype(str).str.strip()
 
-        # 🔥 FILTER
-        filtered_new = filter_new_only(exist_all, new_db)
-        
-        # 🔥 WAJIB GROUPING LAGI BIAR DOUBLE KEDETECT
-        n_normal, n_double, n_na = grouping(filtered_new)
-        
-        new_final = pd.concat([n_normal, n_double, n_na], ignore_index=True)
-        
-        
-        # 🔥 HITUNG MANUAL (GANTI n_normal dll)
-        n_normal = new_final[new_final["TYPE"] == "NORMAL"]
-        n_double = new_final[new_final["TYPE"] == "DOUBLE"]
-        n_na = new_final[new_final["TYPE"] == "NA"]
-        
-        col1, col2, col3 = st.columns(3)
-        col1.metric("New Normal", len(n_normal))
-        col2.metric("New Merged", len(n_double))
-        col3.metric("New NA", len(n_na))
+    exist_df = sort_by_id(exist_df)
+    exist_df["TYPE"] = "EXISTING"
+    exist_df["KODE_UNIK"] = exist_df["KODE_UNIK"].apply(normalize_kode)
 
-        spacer = pd.DataFrame({
-            "ID": ["", ""],
-            "KODE_UNIK": ["", ""],
-            "Description": ["", ""],
-            "TYPE": ["", ""]
-        })
+    # FILTER
+    filtered_new = filter_new_only(exist_all, new_db)
 
-        separator = pd.DataFrame({
-            "ID": ["--- NEW DATA ---"],
-            "KODE_UNIK": [""],
-            "Description": [""],
-            "TYPE": [""]
-        })
+    # GROUPING new
+    n_normal, n_double, n_na = grouping(filtered_new)
+    new_final = pd.concat([n_normal, n_double, n_na], ignore_index=True)
 
-        final = pd.concat([
-            exist_df,
-            spacer,
-            separator,
-            new_final
-        ], ignore_index=True)
+    n_normal = new_final[new_final["TYPE"] == "NORMAL"]
+    n_double = new_final[new_final["TYPE"] == "DOUBLE"]
+    n_na = new_final[new_final["TYPE"] == "NA"]
 
-        st.success("Mode: UPDATE DATABASE")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("New Normal", len(n_normal))
+    col2.metric("New Merged", len(n_double))
+    col3.metric("New NA", len(n_na))
+
+    spacer = pd.DataFrame({"ID":["",""],"KODE_UNIK":["",""],"Description":["",""],"TYPE":["",""]})
+    separator = pd.DataFrame({"ID":["--- NEW DATA ---"],"KODE_UNIK":[""],"Description":[""],"TYPE":[""]})
+
+    final = pd.concat([exist_df, spacer, separator, new_final], ignore_index=True)
+
+    st.success("Mode: UPDATE DATABASE")
 
     else:
 
