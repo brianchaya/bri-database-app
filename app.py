@@ -188,7 +188,7 @@ def filter_new_only(existing, new):
     new = new.copy()
 
     # =========================
-    # 🔥 SIMPAN GROUP DOUBLE EXISTING
+    # BUILD DOUBLE MAP dari existing
     # =========================
     double_map = {}
     
@@ -199,35 +199,26 @@ def filter_new_only(existing, new):
         if len(ids) > 1:
             for i in ids:
                 double_map[i.strip()] = kode
-            
+
     # =========================
-    # 🔥 FUNCTION: EXPLODE EXISTING (KUNCI UTAMA)
+    # EXPLODE EXISTING
     # =========================
     def explode_existing(df):
         rows = []
-
         for _, row in df.iterrows():
             kode = row["KODE_UNIK"]
             desc = row["Description"]
-
             ids = str(row["ID"]).split(";")
-
             for i in ids:
                 i = i.strip()
                 if i != "":
-                    rows.append({
-                        "ID": i,
-                        "KODE_UNIK": kode,
-                        "Description": desc
-                    })
-
+                    rows.append({"ID": i, "KODE_UNIK": kode, "Description": desc})
         return pd.DataFrame(rows)
 
-    # 🔥 EXPLODE DULU
     existing = explode_existing(existing)
 
     # =========================
-    # SAMAIN RULE
+    # NORMALIZE
     # =========================
     def is_numeric(x):
         return str(x).strip().isdigit()
@@ -235,67 +226,68 @@ def filter_new_only(existing, new):
     existing.loc[~existing["ID"].apply(is_numeric), "KODE_UNIK"] = "N/A"
     new.loc[~new["ID"].apply(is_numeric), "KODE_UNIK"] = "N/A"
 
-    # =========================
-    # CLEAN
-    # =========================
     existing["KODE_UNIK"] = existing["KODE_UNIK"].apply(normalize_kode)
     new["KODE_UNIK"] = new["KODE_UNIK"].apply(normalize_kode)
 
     existing["Description"] = existing["Description"].astype(str).str.strip().str.upper()
     new["Description"] = new["Description"].astype(str).str.strip().str.upper()
 
-    existing = existing.drop_duplicates(subset=["ID","KODE_UNIK","Description"])
+    existing = existing.drop_duplicates(subset=["ID", "KODE_UNIK", "Description"])
 
     # =========================
-    # 🔥 NON N/A → PAIR MATCH (SUDAH AKURAT)
+    # BUILD existing pairs (non N/A)
     # =========================
     existing_pairs = set(
         existing.loc[existing["KODE_UNIK"] != "N/A"]
         .apply(lambda x: f"{x['KODE_UNIK']}||{x['ID']}", axis=1)
     )
 
+    # 🔥 TAMBAHAN: build existing ID set (semua ID yg sudah ada, apapun kode-nya)
+    existing_all_ids = set(existing["ID"].astype(str).str.strip())
+
+    # =========================
+    # NON N/A: filter new
+    # =========================
     new_valid = new[new["KODE_UNIK"] != "N/A"].copy()
 
-    # 🔥 CEK: kalau ID ini bagian dari DOUBLE existing → paksa ikut kode lama
+    # Force kode dari double_map kalau ID sudah ada di merged existing
     def force_existing_double(row):
         id_val = str(row["ID"]).strip()
-        
         if id_val in double_map:
             row["KODE_UNIK"] = double_map[id_val]
-        
         return row
-    
+
     new_valid = new_valid.apply(force_existing_double, axis=1)
 
     new_valid["PAIR"] = new_valid.apply(
         lambda x: f"{x['KODE_UNIK']}||{x['ID']}", axis=1
     )
 
+    new_valid = new_valid[~new_valid["PAIR"].isin(existing_pairs)]
+
+    # 🔥 TAMBAHAN: buang juga ID yang sudah ada di existing (dengan KODE apapun)
+    # ini yang bikin double lama muncul lagi sebagai new
     new_valid = new_valid[
-        ~new_valid["PAIR"].isin(existing_pairs)
+        ~new_valid["ID"].astype(str).str.strip().isin(existing_all_ids)
     ]
 
     new_valid = new_valid.drop(columns=["PAIR"])
 
     # =========================
-    # N/A → EXACT DESCRIPTION
+    # N/A: filter by exact description
     # =========================
     existing_na_desc = set(
         existing.loc[existing["KODE_UNIK"] == "N/A", "Description"]
     )
 
     new_na = new[new["KODE_UNIK"] == "N/A"]
-
-    new_na = new_na[
-        ~new_na["Description"].isin(existing_na_desc)
-    ]
+    new_na = new_na[~new_na["Description"].isin(existing_na_desc)]
 
     # =========================
     # FINAL
     # =========================
     final = pd.concat([new_valid, new_na], ignore_index=True)
-
-    final = final.drop_duplicates(subset=["ID","KODE_UNIK","Description"])
+    final = final.drop_duplicates(subset=["ID", "KODE_UNIK", "Description"])
 
     return final
     
