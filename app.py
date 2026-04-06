@@ -294,10 +294,8 @@ def grouping(db):
         x = str(x).strip()
         return x.isdigit()
     
-    db["IS_NUMERIC_ID"] = db["ID"].apply(is_pure_numeric_single)
-    
     # override: kalau ID bukan numeric → paksa jadi NA
-    db.loc[db["IS_NUMERIC_ID"] == False, "KODE_UNIK"] = "N/A"
+    db.loc[~db["ID"].apply(is_pure_numeric_single), "KODE_UNIK"] = "N/A"
     
     db_na = db[db["KODE_UNIK"] == "N/A"].copy()
     db_valid = db[db["KODE_UNIK"] != "N/A"].copy()
